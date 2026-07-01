@@ -1,7 +1,7 @@
 {
   "organization": "Spring Educational Services",
   "_comment": "SINGLE SOURCE OF TRUTH. Per committee provide: key, name, color, calendar_id. The iCal URL, subscribe link, and sheet tab name are auto-derived. After editing, run: python tools/gen_config.py (regenerates _Config.csv, Committees.gs, and site/data/*.json).",
-  "google_api_key": "",
+  "google_api_key": "AIzaSyB00uRS89jZKkejMKlg58nsUYjsuHu2UjQ",
   "_google_api_key_note": "Public Google Calendar API key for the live website. Create at console.cloud.google.com (enable Calendar API, restrict the key to the Calendar API + your site's domain). It is read-only and safe to expose in a public site.",
   "combined": {
     "name": "SES – All Events",
