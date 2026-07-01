@@ -33,12 +33,6 @@
   <p class="all-note" id="all-note"></p>
 
   <div id="cards" class="cards"></div>
-
-  <section class="downloads">
-    <h2>This month's printable calendars</h2>
-    <p class="hint">Right-click → Save to share on WhatsApp, email, or print.</p>
-    <div id="images" class="image-gallery"></div>
-  </section>
 </main>
 
 <script>
@@ -48,16 +42,9 @@ async function loadJSON(path) {
   return res.json();
 }
 
-function monthStamp() {
-  const d = new Date();
-  return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0");
-}
-
 (async function () {
   const committees = await loadJSON("data/committees.json");
   const cards = document.getElementById("cards");
-  const images = document.getElementById("images");
-  const stamp = monthStamp();
 
   // "Subscribe to ALL events" banner (the combined SES – All Events calendar).
   try {
@@ -93,33 +80,7 @@ function monthStamp() {
        <h3>${c.name}</h3>
        <div class="card-actions">${gcal}${ical}</div>`;
     cards.appendChild(card);
-
-    // Per-committee monthly image (if generated).
-    const fig = document.createElement("figure");
-    fig.className = "thumb";
-    fig.innerHTML =
-      `<a href="images/${c.key}-${stamp}.png" target="_blank" rel="noopener">
-         <img loading="lazy" src="images/${c.key}-${stamp}.png" alt="${c.name} ${stamp}"
-              onerror="this.closest('figure').style.display='none'">
-       </a>
-       <figcaption>${c.name}
-         <a class="pdf-link" href="images/${c.key}-${stamp}.pdf">PDF</a>
-       </figcaption>`;
-    images.appendChild(fig);
   }
-
-  // Combined image first.
-  const combined = document.createElement("figure");
-  combined.className = "thumb wide";
-  combined.innerHTML =
-    `<a href="images/all-${stamp}.png" target="_blank" rel="noopener">
-       <img loading="lazy" src="images/all-${stamp}.png" alt="All groups ${stamp}"
-            onerror="this.closest('figure').style.display='none'">
-     </a>
-     <figcaption>All Groups (Combined)
-       <a class="pdf-link" href="images/all-${stamp}.pdf">PDF</a>
-     </figcaption>`;
-  images.insertBefore(combined, images.firstChild);
 })();
 </script>
 </body>

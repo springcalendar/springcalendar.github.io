@@ -78,6 +78,16 @@ def load_combined(path=COMMITTEES_JSON):
     }
 
 
+def load_settings(path=COMMITTEES_JSON):
+    """Site-wide settings for the live website (e.g. the Google Calendar API key)."""
+    with open(path, encoding="utf-8") as f:
+        data = json.load(f)
+    return {
+        "organization": data.get("organization", ""),
+        "google_api_key": data.get("google_api_key", ""),
+    }
+
+
 def load_meta(path=COMMITTEES_JSON):
     with open(path, encoding="utf-8") as f:
         data = json.load(f)

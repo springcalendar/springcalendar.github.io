@@ -1,4 +1,4 @@
-"""Regenerate derived config from the single source of truth (committees.json).
+"""Regenerate all derived config from the single source of truth (committees.json).
 
 Run after editing committees.json:
 
@@ -7,21 +7,26 @@ Run after editing committees.json:
 It rewrites:
   - sheet-templates/_Config.csv   -> import into the Google Sheet's _Config tab
   - apps-script/Committees.gs     -> paste into the Apps Script project (tab list)
+  - site/data/committees.json     -> committee list (name, color, calendar_id, links) for the website
+  - site/data/combined.json       -> the "SES – All Events" subscribe info
+  - site/data/settings.json       -> site settings (Google Calendar API key)
 
-Nothing here needs credentials; it's pure text generation.
+Pure Python standard library only — no credentials, no third-party deps.
 """
 
 import csv
+import json
 import os
 import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "render"))
 
-from committees import load_committees, load_combined  # noqa: E402
+from committees import load_committees, load_combined, load_settings  # noqa: E402
 
 CONFIG_CSV = os.path.join(ROOT, "sheet-templates", "_Config.csv")
 COMMITTEES_GS = os.path.join(ROOT, "apps-script", "Committees.gs")
+SITE_DATA = os.path.join(ROOT, "site", "data")
 
 
 def write_config_csv(committees, combined):
@@ -79,15 +84,52 @@ def write_committees_gs(committees, combined):
     print(f"  wrote {os.path.relpath(COMMITTEES_GS, ROOT)}")
 
 
+def _write_json(name, obj):
+    os.makedirs(SITE_DATA, exist_ok=True)
+    path = os.path.join(SITE_DATA, name)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(obj, f, ensure_ascii=False, indent=2)
+    print(f"  wrote {os.path.relpath(path, ROOT)}")
+
+
+def write_site_config(committees, combined, settings):
+    """Static config the live website reads (no event data — events load live from
+    the Google Calendar API in the browser)."""
+    _write_json("committees.json", [
+        {
+            "key": c["key"],
+            "name": c["name"],
+            "color": c["color"],
+            "calendar_id": c["calendar_id"],
+            "subscribe_url": c["subscribe_url"],
+            "ical_url": c["ical_url"],
+        }
+        for c in committees
+    ])
+    _write_json("combined.json", {
+        "name": combined["name"] if combined else "SES – All Events",
+        "color": combined["color"] if combined else "#0f172a",
+        "calendar_id": combined["calendar_id"] if combined else "",
+        "subscribe_url": combined["subscribe_url"] if combined else "",
+        "ical_url": combined["ical_url"] if combined else "",
+    })
+    _write_json("settings.json", {
+        "organization": settings["organization"],
+        "google_api_key": settings["google_api_key"],
+    })
+
+
 def main():
     committees = load_committees()
     combined = load_combined()
+    settings = load_settings()
     print(f"Generating config for {len(committees)} committees"
           + (" + combined calendar:" if combined else ":"))
     write_config_csv(committees, combined)
     write_committees_gs(committees, combined)
+    write_site_config(committees, combined, settings)
     print("Done. Next: import _Config.csv into the sheet (or paste the CalendarId "
-          "column), and re-run python render/build.py.")
+          "column). Commit + push to update the live site.")
 
 
 if __name__ == "__main__":

@@ -1,11 +1,13 @@
-name: Build & Deploy Calendar Site
+name: Deploy Calendar Site
+
+# The site is fully static and loads events live from the Google Calendar API in
+# the browser, so there is nothing to build — we just publish the site/ folder.
+# No Python, no Playwright, no schedule needed.
 
 on:
-  workflow_dispatch:        # run on demand from the Actions tab
+  workflow_dispatch:
   push:
     branches: [main]
-  schedule:
-    - cron: "0 * * * *"     # hourly: refresh events from the calendar feeds
 
 permissions:
   contents: read
@@ -17,38 +19,16 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-          cache: pip
-          cache-dependency-path: render/requirements.txt
-
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r render/requirements.txt
-          python -m playwright install --with-deps chromium
-
-      - name: Build site data + monthly images
-        working-directory: render
-        run: python build.py
-
-      - name: Upload Pages artifact
-        uses: actions/upload-pages-artifact@v3
-        with:
-          path: site
-
   deploy:
-    needs: build
     runs-on: ubuntu-latest
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
+      - uses: actions/checkout@v4
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
       - id: deployment
         uses: actions/deploy-pages@v4

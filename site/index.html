@@ -7,6 +7,7 @@
 <link rel="icon" type="image/png" href="assets/SES_icon.png">
 <link rel="stylesheet" href="assets/site.css">
 <script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.15/index.global.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@fullcalendar/google-calendar@6.1.15/index.global.min.js"></script>
 </head>
 <body>
 <header class="site-header">
@@ -31,6 +32,7 @@
   </aside>
 
   <section class="calendar-wrap">
+    <div id="notice" class="notice hidden"></div>
     <div id="calendar"></div>
   </section>
 </main>
@@ -49,6 +51,7 @@
 
 <script>
 const DATA = "data/";
+const byKey = {};   // committee key -> {name, color}
 
 async function loadJSON(path) {
   const res = await fetch(path, { cache: "no-store" });
@@ -59,9 +62,7 @@ async function loadJSON(path) {
 function fmtWhen(ev) {
   const opts = { weekday: "long", year: "numeric", month: "long", day: "numeric" };
   const start = ev.start;
-  if (ev.allDay) {
-    return start.toLocaleDateString(undefined, opts) + " · All day";
-  }
+  if (ev.allDay) return start.toLocaleDateString(undefined, opts) + " · All day";
   const time = { hour: "numeric", minute: "2-digit" };
   let s = start.toLocaleDateString(undefined, opts) + " · " +
           start.toLocaleTimeString(undefined, time);
@@ -69,42 +70,55 @@ function fmtWhen(ev) {
   return s;
 }
 
+function source(c) {
+  // A live Google Calendar event source — the browser reads events directly
+  // from Google, so the site is always current (no rebuild needed).
+  return { id: c.key, googleCalendarId: c.calendar_id, color: c.color };
+}
+
 (async function () {
-  const committees = await loadJSON(DATA + "committees.json");
+  const [committees, settings] = await Promise.all([
+    loadJSON(DATA + "committees.json"),
+    loadJSON(DATA + "settings.json").catch(() => ({})),
+  ]);
+  committees.forEach((c) => { byKey[c.key] = c; });
+
   const calendarEl = document.getElementById("calendar");
   const togglesEl = document.getElementById("committee-toggles");
+  const apiKey = settings.google_api_key || "";
 
   const calendar = new FullCalendar.Calendar(calendarEl, {
     initialView: "dayGridMonth",
     height: "auto",
     headerToolbar: { left: "prev,next today", center: "title", right: "dayGridMonth,listMonth" },
     dayMaxEvents: 4,
+    googleCalendarApiKey: apiKey,
+    eventSources: apiKey ? committees.filter((c) => c.calendar_id).map(source) : [],
     eventClick: function (info) {
-      info.jsEvent.preventDefault();
+      info.jsEvent.preventDefault(); // don't open the Google event page
       showModal(info.event);
     },
   });
 
-  // One toggleable event source per committee.
+  // Toggle a committee's live source on/off.
   for (const c of committees) {
-    const source = { id: c.key, url: DATA + c.key + ".json", color: c.color };
-    calendar.addEventSource(source);
-
     const label = document.createElement("label");
     label.className = "toggle";
     label.innerHTML =
-      `<input type="checkbox" checked data-key="${c.key}">
+      `<input type="checkbox" ${apiKey && c.calendar_id ? "checked" : ""} ${apiKey && c.calendar_id ? "" : "disabled"}>
        <span class="swatch" style="background:${c.color}"></span>
        <span class="toggle-name">${c.name}</span>`;
     label.querySelector("input").addEventListener("change", (e) => {
-      if (e.target.checked) {
-        calendar.addEventSource({ id: c.key, url: DATA + c.key + ".json", color: c.color });
-      } else {
-        const src = calendar.getEventSourceById(c.key);
-        if (src) src.remove();
-      }
+      if (e.target.checked) calendar.addEventSource(source(c));
+      else { const s = calendar.getEventSourceById(c.key); if (s) s.remove(); }
     });
     togglesEl.appendChild(label);
+  }
+
+  if (!apiKey) {
+    const n = document.getElementById("notice");
+    n.className = "notice";
+    n.textContent = "Live calendar not configured yet — add a Google Calendar API key in committees.json (google_api_key), regenerate, and redeploy.";
   }
 
   calendar.render();
@@ -113,9 +127,9 @@ function fmtWhen(ev) {
 // Modal
 const modal = document.getElementById("modal");
 function showModal(ev) {
+  const committee = byKey[ev.source ? ev.source.id : ""] || {};
   document.getElementById("modal-title").textContent = ev.title;
-  document.getElementById("modal-committee").textContent =
-    ev.extendedProps.committeeName || "";
+  document.getElementById("modal-committee").textContent = committee.name || "";
   document.getElementById("modal-committee").style.color = ev.backgroundColor || "#334155";
   document.getElementById("modal-when").textContent = fmtWhen(ev);
   const where = ev.extendedProps.location;
