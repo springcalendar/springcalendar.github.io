@@ -1,0 +1,13 @@
+# Editor / tooling
+.claude/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Generated site artifacts (rebuilt by build.py / CI).
+# Comment these out if you prefer to commit the generated files.
+site/data/
+site/images/

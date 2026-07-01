@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Spring Educational Services — Calendar</title>
+<link rel="icon" type="image/png" href="assets/SES_icon.png">
+<link rel="stylesheet" href="assets/site.css">
+<script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.15/index.global.min.js"></script>
+</head>
+<body>
+<header class="site-header">
+  <div class="brand">
+    <img class="brand-logo" src="assets/SES_icon.png" alt="Spring Educational Services logo">
+    <div class="brand-text">
+      <div class="brand-kicker">Spring Educational Services</div>
+      <h1>Calendar</h1>
+    </div>
+  </div>
+  <nav class="site-nav">
+    <a href="index.html" class="active">Calendar</a>
+    <a href="subscribe.html">Subscribe</a>
+  </nav>
+</header>
+
+<main class="layout">
+  <aside class="sidebar">
+    <h2>Groups</h2>
+    <p class="hint">Toggle groups to show or hide their events.</p>
+    <div id="committee-toggles" class="toggles"></div>
+  </aside>
+
+  <section class="calendar-wrap">
+    <div id="calendar"></div>
+  </section>
+</main>
+
+<!-- Event detail modal -->
+<div id="modal" class="modal hidden">
+  <div class="modal-card">
+    <button class="modal-close" id="modal-close" aria-label="Close">&times;</button>
+    <div class="modal-committee" id="modal-committee"></div>
+    <h3 id="modal-title"></h3>
+    <div class="modal-row" id="modal-when"></div>
+    <div class="modal-row" id="modal-where"></div>
+    <p class="modal-desc" id="modal-desc"></p>
+  </div>
+</div>
+
+<script>
+const DATA = "data/";
+
+async function loadJSON(path) {
+  const res = await fetch(path, { cache: "no-store" });
+  if (!res.ok) throw new Error("Failed to load " + path);
+  return res.json();
+}
+
+function fmtWhen(ev) {
+  const opts = { weekday: "long", year: "numeric", month: "long", day: "numeric" };
+  const start = ev.start;
+  if (ev.allDay) {
+    return start.toLocaleDateString(undefined, opts) + " · All day";
+  }
+  const time = { hour: "numeric", minute: "2-digit" };
+  let s = start.toLocaleDateString(undefined, opts) + " · " +
+          start.toLocaleTimeString(undefined, time);
+  if (ev.end) s += " – " + ev.end.toLocaleTimeString(undefined, time);
+  return s;
+}
+
+(async function () {
+  const committees = await loadJSON(DATA + "committees.json");
+  const calendarEl = document.getElementById("calendar");
+  const togglesEl = document.getElementById("committee-toggles");
+
+  const calendar = new FullCalendar.Calendar(calendarEl, {
+    initialView: "dayGridMonth",
+    height: "auto",
+    headerToolbar: { left: "prev,next today", center: "title", right: "dayGridMonth,listMonth" },
+    dayMaxEvents: 4,
+    eventClick: function (info) {
+      info.jsEvent.preventDefault();
+      showModal(info.event);
+    },
+  });
+
+  // One toggleable event source per committee.
+  for (const c of committees) {
+    const source = { id: c.key, url: DATA + c.key + ".json", color: c.color };
+    calendar.addEventSource(source);
+
+    const label = document.createElement("label");
+    label.className = "toggle";
+    label.innerHTML =
+      `<input type="checkbox" checked data-key="${c.key}">
+       <span class="swatch" style="background:${c.color}"></span>
+       <span class="toggle-name">${c.name}</span>`;
+    label.querySelector("input").addEventListener("change", (e) => {
+      if (e.target.checked) {
+        calendar.addEventSource({ id: c.key, url: DATA + c.key + ".json", color: c.color });
+      } else {
+        const src = calendar.getEventSourceById(c.key);
+        if (src) src.remove();
+      }
+    });
+    togglesEl.appendChild(label);
+  }
+
+  calendar.render();
+})();
+
+// Modal
+const modal = document.getElementById("modal");
+function showModal(ev) {
+  document.getElementById("modal-title").textContent = ev.title;
+  document.getElementById("modal-committee").textContent =
+    ev.extendedProps.committeeName || "";
+  document.getElementById("modal-committee").style.color = ev.backgroundColor || "#334155";
+  document.getElementById("modal-when").textContent = fmtWhen(ev);
+  const where = ev.extendedProps.location;
+  document.getElementById("modal-where").textContent = where ? "📍 " + where : "";
+  document.getElementById("modal-desc").textContent = ev.extendedProps.description || "";
+  modal.classList.remove("hidden");
+}
+document.getElementById("modal-close").onclick = () => modal.classList.add("hidden");
+modal.addEventListener("click", (e) => { if (e.target === modal) modal.classList.add("hidden"); });
+</script>
+</body>
+</html>

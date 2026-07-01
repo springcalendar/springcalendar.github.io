@@ -1,0 +1,474 @@
+/**
+ * Spring Educational Services — Sheet → Google Calendar sync.
+ *
+ * Bound to the committee Google Sheet. For each committee tab it reconciles the
+ * rows against that committee's Google Calendar:
+ *   - new row (no Event ID)      -> create event, write its ID back to col I
+ *   - existing row, changed      -> update the event in place (series: recreate)
+ *   - row cleared / orphaned     -> delete the calendar event
+ *
+ * Idempotent: each event's ID lives in col I and a content hash lives on the
+ * event as a tag, so re-running never creates duplicates.
+ *
+ * Runs as your Google account — no API keys/secrets. Run `setupTriggers` once.
+ */
+
+// ---- Sheet layout ---------------------------------------------------------
+var COL = {
+  TITLE: 1,        // A
+  START_DATE: 2,   // B
+  START_TIME: 3,   // C  (blank => all-day)
+  END_DATE: 4,     // D  (blank => single-day; fill for multi-day events)
+  END_TIME: 5,     // E
+  LOCATION: 6,     // F
+  DESCRIPTION: 7,  // G
+  REPEAT: 8,       // H  (None | Weekly | Monthly)
+  REPEAT_UNTIL: 9, // I
+  EVENT_ID: 10,    // J  (auto)
+  LAST_SYNCED: 11, // K  (auto)
+  STATUS: 12       // L  (auto)
+};
+var FIRST_DATA_ROW = 2;
+var CONFIG_SHEET = '_Config';
+var SYNC_TAG = 'ses_sync';   // marks events we manage
+var HASH_TAG = 'ses_hash';   // content hash for change detection
+var SRC_TAG = 'ses_src';     // on combined-calendar mirrors: source committee event id
+var COMBINED_NAME = 'SES – All Events'; // _Config row for the combined calendar (en dash)
+
+// ===========================================================================
+// Triggers
+// ===========================================================================
+
+/** Run once from the editor to install triggers. */
+function setupTriggers() {
+  var triggers = ScriptApp.getProjectTriggers();
+  for (var i = 0; i < triggers.length; i++) {
+    ScriptApp.deleteTrigger(triggers[i]);
+  }
+  ScriptApp.newTrigger('syncAll').timeBased().everyMinutes(10).create();
+  ScriptApp.newTrigger('onEditSync')
+    .forSpreadsheet(SpreadsheetApp.getActive())
+    .onEdit()
+    .create();
+  SpreadsheetApp.getActive().toast('Triggers installed. Running first sync…');
+  syncAll();
+}
+
+/**
+ * On-edit: sync ONLY the edited row(s) — a single lightweight calendar call.
+ * The expensive cross-row orphan sweep is left to the timed syncAll, so typing
+ * in the sheet stays fast.
+ */
+function onEditSync(e) {
+  if (!e || !e.range) return;
+  var sheet = e.range.getSheet();
+  var map = readConfig();
+  var cfg = map[sheet.getName()];
+  if (!cfg) return;                                   // not a committee tab
+  if (e.range.getColumn() >= COL.EVENT_ID) return;    // ignore auto-managed cols I:K
+
+  var calendar = CalendarApp.getCalendarById(cfg.calendarId);
+  if (!calendar) return;
+
+  var start = e.range.getRow();
+  var count = e.range.getNumRows();
+  for (var r = start; r < start + count; r++) {
+    if (r >= FIRST_DATA_ROW) syncSheetRow(sheet, calendar, r, null, null);
+  }
+}
+
+// ===========================================================================
+// Sync
+// ===========================================================================
+
+/** Sync every committee tab listed in _Config, then mirror into the combined calendar. */
+function syncAll() {
+  var map = readConfig();
+  var combined = map[COMBINED_NAME];
+  var live = []; // { id: committeeEventId, ev: parsedEvent } across all committees
+
+  Object.keys(map).forEach(function (sheetName) {
+    if (sheetName === COMBINED_NAME) return; // combined row has no committee tab
+    try {
+      var synced = syncSheet(sheetName, map[sheetName].calendarId);
+      for (var i = 0; i < synced.length; i++) live.push(synced[i]);
+    } catch (err) {
+      Logger.log('Sync failed for ' + sheetName + ': ' + err);
+    }
+  });
+
+  if (combined && combined.calendarId) {
+    try {
+      mirrorCombined_(combined.calendarId, live);
+    } catch (err) {
+      Logger.log('Combined mirror failed: ' + err);
+    }
+  }
+}
+
+/**
+ * Reconcile one committee tab against its calendar.
+ * Returns an array of { id, ev } for every live row (for the combined mirror).
+ */
+function syncSheet(sheetName, calendarId) {
+  var sheet = SpreadsheetApp.getActive().getSheetByName(sheetName);
+  if (!sheet) return [];
+  var calendar = CalendarApp.getCalendarById(calendarId);
+  if (!calendar) throw new Error('No access to calendar ' + calendarId);
+
+  var lastRow = sheet.getLastRow();
+  var liveIds = {}; // event IDs still referenced by a (non-blank) row
+  var live = [];
+
+  if (lastRow >= FIRST_DATA_ROW) {
+    // Read the whole data block in ONE call instead of row-by-row.
+    var data = sheet.getRange(FIRST_DATA_ROW, 1, lastRow - FIRST_DATA_ROW + 1, COL.STATUS)
+                    .getValues();
+    for (var i = 0; i < data.length; i++) {
+      var res = syncSheetRow(sheet, calendar, FIRST_DATA_ROW + i, liveIds, data[i]);
+      if (res) live.push(res);
+    }
+  }
+
+  sweepOrphans(calendar, liveIds);
+  return live;
+}
+
+/**
+ * Sync a single row to the calendar. `values` may be passed in (to avoid a
+ * re-read); `liveIds` is the running set for the orphan sweep (null on edit).
+ * Returns { id, ev } for a live row, or null otherwise.
+ */
+function syncSheetRow(sheet, calendar, row, liveIds, values) {
+  if (!values) values = sheet.getRange(row, 1, 1, COL.STATUS).getValues()[0];
+  var ev = parseRow(values);
+  var eventId = String(values[COL.EVENT_ID - 1] || '').trim();
+
+  // Blank row that still holds an Event ID => the event was removed.
+  if (!ev.title && !ev.startDate) {
+    if (eventId) {
+      deleteEvent(calendar, eventId);
+      clearAutoCols(sheet, row);
+    }
+    return null;
+  }
+
+  // Incomplete row (missing title or start date) — flag and skip.
+  if (!ev.title || !ev.startDate) {
+    writeStatus(sheet, row, 'Needs Title and Start Date');
+    return null;
+  }
+
+  try {
+    var newId = upsertEvent(calendar, eventId, ev);
+    if (newId !== eventId) sheet.getRange(row, COL.EVENT_ID).setValue(newId);
+    if (liveIds) liveIds[newId] = true;
+    sheet.getRange(row, COL.LAST_SYNCED).setValue(new Date());
+    writeStatus(sheet, row, 'Synced');
+    return { id: newId, ev: ev };
+  } catch (err) {
+    writeStatus(sheet, row, 'Error: ' + err.message);
+    return null;
+  }
+}
+
+// ===========================================================================
+// Event create / update / delete
+// ===========================================================================
+
+/** Create or update; returns the (possibly new) event ID. */
+function upsertEvent(calendar, eventId, ev) {
+  var hash = contentHash(ev);
+  var isSeries = ev.repeat === 'Weekly' || ev.repeat === 'Monthly';
+
+  if (eventId) {
+    var existing = safeGetEvent(calendar, eventId);
+    if (existing) {
+      if (existing.getTag(HASH_TAG) === hash) return eventId; // unchanged
+      // Series edits aren't reliably patchable in place -> recreate.
+      if (isSeries || existing.isRecurringEvent && existing.isRecurringEvent()) {
+        deleteEvent(calendar, eventId);
+      } else {
+        applyToEvent(existing, ev);
+        existing.setTag(HASH_TAG, hash);
+        return eventId;
+      }
+    }
+  }
+  return createEvent(calendar, ev, hash);
+}
+
+function createEvent(calendar, ev, hash) {
+  var event = createEventOn_(calendar, ev);
+  event.setTag(SYNC_TAG, '1');
+  event.setTag(HASH_TAG, hash);
+  return event.getId();
+}
+
+/** Build the calendar event on `calendar` (no tags). Shared by committee + mirror. */
+function createEventOn_(calendar, ev) {
+  if (ev.repeat === 'Weekly' || ev.repeat === 'Monthly') {
+    var recurrence = CalendarApp.newRecurrence();
+    var rule = ev.repeat === 'Weekly'
+      ? recurrence.addWeeklyRule()
+      : recurrence.addMonthlyRule();
+    if (ev.repeatUntil) rule.until(ev.repeatUntil);
+    // Recurring occurrences use the start day/time; per-occurrence multi-day
+    // spans aren't supported by CalendarApp series, so each occurrence is one day.
+    if (ev.allDay) {
+      return calendar.createAllDayEventSeries(ev.title, ev.startDate, recurrence, opts(ev));
+    }
+    return calendar.createEventSeries(ev.title, ev.start, ev.end, recurrence, opts(ev));
+  }
+  if (ev.allDay) {
+    if (ev.multiDay) {
+      return calendar.createAllDayEvent(ev.title, ev.startDate, exclusiveEnd_(ev.endDate), opts(ev));
+    }
+    return calendar.createAllDayEvent(ev.title, ev.startDate, opts(ev));
+  }
+  // Timed events (single or multi-day) use the resolved start/end datetimes.
+  return calendar.createEvent(ev.title, ev.start, ev.end, opts(ev));
+}
+
+function applyToEvent(event, ev) {
+  event.setTitle(ev.title);
+  event.setLocation(ev.location || '');
+  event.setDescription(ev.description || '');
+  if (ev.allDay) {
+    if (ev.multiDay) {
+      event.setAllDayDates(ev.startDate, exclusiveEnd_(ev.endDate));
+    } else {
+      event.setAllDayDate(ev.startDate);
+    }
+  } else {
+    event.setTime(ev.start, ev.end);
+  }
+}
+
+function deleteEvent(calendar, eventId) {
+  var event = safeGetEvent(calendar, eventId);
+  if (event) {
+    try { event.deleteEventSeries(); } catch (e) { /* not a series */ }
+    try { event.deleteEvent(); } catch (e) { /* already gone */ }
+  }
+}
+
+/** Delete managed single events whose ID no longer appears in the sheet. */
+function sweepOrphans(calendar, liveIds) {
+  var from = new Date();
+  from.setFullYear(from.getFullYear() - 1);
+  var to = new Date();
+  to.setFullYear(to.getFullYear() + 2);
+
+  var events = calendar.getEvents(from, to);
+  for (var i = 0; i < events.length; i++) {
+    var e = events[i];
+    if (e.getTag(SYNC_TAG) !== '1') continue;
+    if (e.isRecurringEvent && e.isRecurringEvent()) continue; // series handled by row-clear
+    if (!liveIds[e.getId()]) {
+      try { e.deleteEvent(); } catch (err) { /* ignore */ }
+    }
+  }
+}
+
+// ===========================================================================
+// Combined "SES – All Events" mirror
+// ===========================================================================
+
+/**
+ * Mirror every live committee event into the combined calendar. Each mirror is
+ * tagged with its source committee event id (SRC_TAG), so we reconcile without
+ * needing a second column in the sheet. Runs only from the timed syncAll.
+ */
+function mirrorCombined_(combinedCalendarId, live) {
+  var cal = CalendarApp.getCalendarById(combinedCalendarId);
+  if (!cal) { Logger.log('No access to combined calendar ' + combinedCalendarId); return; }
+
+  var from = new Date(); from.setFullYear(from.getFullYear() - 1);
+  var to = new Date(); to.setFullYear(to.getFullYear() + 2);
+  var existing = cal.getEvents(from, to);
+
+  // Index existing mirrors by their source committee-event id.
+  var bySrc = {};
+  for (var i = 0; i < existing.length; i++) {
+    var e = existing[i];
+    if (e.getTag(SYNC_TAG) !== '1') continue;
+    var src = e.getTag(SRC_TAG);
+    if (src) bySrc[src] = e;
+  }
+
+  // Create/update mirrors for every live committee event.
+  var liveSrc = {};
+  for (var j = 0; j < live.length; j++) {
+    var srcId = live[j].id;
+    var ev = live[j].ev;
+    liveSrc[srcId] = true;
+    var hash = contentHash(ev);
+    var mirror = bySrc[srcId];
+    if (mirror) {
+      if (mirror.getTag(HASH_TAG) === hash) continue; // unchanged
+      var seriesish = ev.repeat === 'Weekly' || ev.repeat === 'Monthly' ||
+                      (mirror.isRecurringEvent && mirror.isRecurringEvent());
+      if (seriesish) {
+        deleteCalEvent_(mirror);
+        createMirror_(cal, ev, srcId, hash);
+      } else {
+        applyToEvent(mirror, ev);
+        mirror.setTag(HASH_TAG, hash);
+      }
+    } else {
+      createMirror_(cal, ev, srcId, hash);
+    }
+  }
+
+  // Remove mirrors whose source row no longer exists. SRC_TAG is on the series,
+  // so recurring orphans are removed whole by their first instance.
+  for (var k = 0; k < existing.length; k++) {
+    var m = existing[k];
+    if (m.getTag(SYNC_TAG) !== '1') continue;
+    var s = m.getTag(SRC_TAG);
+    if (s && !liveSrc[s]) deleteCalEvent_(m);
+  }
+}
+
+function createMirror_(calendar, ev, srcId, hash) {
+  var event = createEventOn_(calendar, ev);
+  event.setTag(SYNC_TAG, '1');
+  event.setTag(SRC_TAG, srcId);
+  event.setTag(HASH_TAG, hash);
+  return event.getId();
+}
+
+function deleteCalEvent_(event) {
+  try { event.deleteEventSeries(); } catch (e) { /* not a series */ }
+  try { event.deleteEvent(); } catch (e) { /* already gone */ }
+}
+
+// ===========================================================================
+// Helpers
+// ===========================================================================
+
+function opts(ev) {
+  return { location: ev.location || '', description: ev.description || '' };
+}
+
+function safeGetEvent(calendar, eventId) {
+  try {
+    return calendar.getEventById(eventId);
+  } catch (e) {
+    return null;
+  }
+}
+
+/** Read a sheet row into a normalized event object. */
+function parseRow(v) {
+  var title = String(v[COL.TITLE - 1] || '').trim();
+  var startDate = toDate_(v[COL.START_DATE - 1]);
+  var endDate = toDate_(v[COL.END_DATE - 1]) || startDate;        // blank => single-day
+  if (startDate && endDate && endDate < startDate) endDate = startDate; // guard typos
+
+  var startTime = v[COL.START_TIME - 1];
+  var endTime = v[COL.END_TIME - 1];
+  var allDay = !startTime;
+  var multiDay = !!(startDate && endDate && endDate > startDate);
+
+  // Resolved start/end as datetimes (for timed events).
+  var start = startDate;
+  var end = null;
+  if (startDate && !allDay) {
+    start = combine(startDate, startTime);
+    end = endTime ? combine(endDate, endTime) : new Date(start.getTime() + 60 * 60 * 1000);
+    if (end <= start) end = new Date(start.getTime() + 60 * 60 * 1000);
+  }
+
+  var repeat = String(v[COL.REPEAT - 1] || 'None').trim();
+  if (repeat.toLowerCase() === 'none' || repeat === '') repeat = 'None';
+  var repeatUntil = toDate_(v[COL.REPEAT_UNTIL - 1]);
+
+  return {
+    title: title,
+    startDate: startDate,
+    endDate: endDate,
+    allDay: allDay,
+    multiDay: multiDay,
+    start: start,                 // datetime (timed) or startDate (all-day)
+    end: end,                     // datetime (timed) or null (all-day)
+    location: String(v[COL.LOCATION - 1] || '').trim(),
+    description: String(v[COL.DESCRIPTION - 1] || '').trim(),
+    repeat: repeat,
+    repeatUntil: repeatUntil
+  };
+}
+
+/** Coerce a sheet cell into a valid Date, or null. */
+function toDate_(val) {
+  var d = val instanceof Date ? val : (val ? new Date(val) : null);
+  return (d && !isNaN(d.getTime())) ? d : null;
+}
+
+/** All-day events use an EXCLUSIVE end date — return endDate + 1 day. */
+function exclusiveEnd_(endDate) {
+  var d = new Date(endDate.getTime());
+  d.setDate(d.getDate() + 1);
+  return d;
+}
+
+/** Combine a date cell with a time cell (Date or "HH:MM" string). */
+function combine(date, time) {
+  var d = new Date(date.getTime());
+  if (time instanceof Date) {
+    d.setHours(time.getHours(), time.getMinutes(), 0, 0);
+  } else {
+    var parts = String(time).split(':');
+    d.setHours(parseInt(parts[0], 10) || 0, parseInt(parts[1], 10) || 0, 0, 0);
+  }
+  return d;
+}
+
+function contentHash(ev) {
+  var parts = [
+    ev.title,
+    ev.startDate ? ev.startDate.getTime() : '',
+    ev.endDate ? ev.endDate.getTime() : '',
+    ev.start ? ev.start.getTime() : '',
+    ev.end ? ev.end.getTime() : '',
+    ev.allDay,
+    ev.multiDay,
+    ev.location,
+    ev.description,
+    ev.repeat,
+    ev.repeatUntil ? ev.repeatUntil.getTime() : ''
+  ].join('|');
+  var bytes = Utilities.computeDigest(Utilities.DigestAlgorithm.MD5, parts);
+  return bytes.map(function (b) {
+    return ('0' + (b & 0xff).toString(16)).slice(-2);
+  }).join('');
+}
+
+function writeStatus(sheet, row, msg) {
+  sheet.getRange(row, COL.STATUS).setValue(msg);
+}
+
+function clearAutoCols(sheet, row) {
+  sheet.getRange(row, COL.EVENT_ID, 1, 3).clearContent();
+}
+
+/** Read _Config into { committeeTabName: {calendarId, color, icalUrl, subscribeUrl} }. */
+function readConfig() {
+  var sheet = SpreadsheetApp.getActive().getSheetByName(CONFIG_SHEET);
+  if (!sheet) throw new Error('Missing "' + CONFIG_SHEET + '" tab');
+  var rows = sheet.getDataRange().getValues();
+  var map = {};
+  for (var i = 1; i < rows.length; i++) { // skip header
+    var name = String(rows[i][0] || '').trim();
+    var calendarId = String(rows[i][1] || '').trim();
+    if (!name || !calendarId) continue;
+    map[name] = {
+      calendarId: calendarId,
+      color: String(rows[i][2] || '').trim(),
+      icalUrl: String(rows[i][3] || '').trim(),
+      subscribeUrl: String(rows[i][4] || '').trim()
+    };
+  }
+  return map;
+}
