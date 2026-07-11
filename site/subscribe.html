@@ -24,15 +24,15 @@
 
 <main class="subscribe">
   <p class="lead">
-    Pick the groups you care about. Tap <strong>Add to Google Calendar</strong> on your
-    phone and that group's events appear automatically — and stay updated whenever
-    new events are added. On Apple/Outlook, use the <strong>iCal link</strong>.
+    Pick the calendars you care about. Tap <strong>Add to Google Calendar</strong> on your
+    phone and those events appear automatically — and stay updated whenever new
+    events are added. On Apple/Outlook, use the <strong>iCal link</strong>.
   </p>
 
-  <div id="all-card"></div>
-  <p class="all-note" id="all-note"></p>
+  <div id="combined" class="combined-cards"></div>
+  <p class="all-note">Tip: subscribe to an "All Events" calendar OR to individual groups — not both, or events show twice.</p>
 
-  <div id="cards" class="cards"></div>
+  <div id="sections"></div>
 </main>
 
 <script>
@@ -42,44 +42,58 @@ async function loadJSON(path) {
   return res.json();
 }
 
+const SECTIONS = [
+  { id: "general", label: "General (everyone)" },
+  { id: "boys", label: "Boys" },
+  { id: "girls", label: "Girls" },
+];
+
+function cardHTML(item) {
+  const gcal = item.subscribe_url
+    ? `<a class="btn primary" href="${item.subscribe_url}" target="_blank" rel="noopener">+ Add to Google Calendar</a>`
+    : `<span class="btn disabled">Link not set yet</span>`;
+  const ical = item.ical_url
+    ? `<a class="btn ghost" href="${item.ical_url}">iCal link (Apple / Outlook)</a>`
+    : "";
+  return `<div class="card" style="--accent:${item.color}">
+      <div class="card-bar"></div>
+      <h3>${item.name}</h3>
+      <div class="card-actions">${gcal}${ical}</div>
+    </div>`;
+}
+
 (async function () {
-  const committees = await loadJSON("data/committees.json");
-  const cards = document.getElementById("cards");
+  const [committees, combined] = await Promise.all([
+    loadJSON("data/committees.json"),
+    loadJSON("data/combined.json").catch(() => []),
+  ]);
 
-  // "Subscribe to ALL events" banner (the combined SES – All Events calendar).
-  try {
-    const combined = await loadJSON("data/combined.json");
-    const allCard = document.getElementById("all-card");
-    const gcal = combined.subscribe_url
-      ? `<a class="btn primary" href="${combined.subscribe_url}" target="_blank" rel="noopener">+ Add all events to Google Calendar</a>`
-      : `<span class="btn disabled">Link not set yet</span>`;
-    const ical = combined.ical_url
-      ? `<a class="btn ghost" href="${combined.ical_url}">iCal link (Apple / Outlook)</a>`
-      : "";
-    allCard.className = "all-banner";
-    allCard.innerHTML =
-      `<div class="all-text"><h2>${combined.name}</h2>
-         <p>One calendar with every group's events.</p></div>
-       <div class="all-actions">${gcal}${ical}</div>`;
-    document.getElementById("all-note").textContent =
-      "Tip: subscribe to specific groups OR to All Events — not both, or events show twice.";
-  } catch (e) { /* no combined.json yet */ }
-
-  for (const c of committees) {
-    const card = document.createElement("div");
-    card.className = "card";
-    card.style.setProperty("--accent", c.color);
+  // Two "All Events" banners (Boys / Girls).
+  const combinedEl = document.getElementById("combined");
+  combinedEl.innerHTML = combined.map((c) => {
     const gcal = c.subscribe_url
       ? `<a class="btn primary" href="${c.subscribe_url}" target="_blank" rel="noopener">+ Add to Google Calendar</a>`
       : `<span class="btn disabled">Link not set yet</span>`;
     const ical = c.ical_url
-      ? `<a class="btn ghost" href="${c.ical_url}">iCal link (Apple / Outlook)</a>`
+      ? `<a class="btn ghost" href="${c.ical_url}">iCal link</a>`
       : "";
-    card.innerHTML =
-      `<div class="card-bar"></div>
-       <h3>${c.name}</h3>
-       <div class="card-actions">${gcal}${ical}</div>`;
-    cards.appendChild(card);
+    return `<div class="all-banner">
+        <div class="all-text"><h2>${c.name}</h2>
+          <p>Every ${c.sheet} event in one calendar.</p></div>
+        <div class="all-actions">${gcal}${ical}</div>
+      </div>`;
+  }).join("");
+
+  // Group cards by section.
+  const sectionsEl = document.getElementById("sections");
+  for (const s of SECTIONS) {
+    const items = committees.filter((c) => c.section === s.id);
+    if (!items.length) continue;
+    const block = document.createElement("section");
+    block.className = "sub-section";
+    block.innerHTML = `<h2 class="sub-heading">${s.label}</h2>
+      <div class="cards">${items.map(cardHTML).join("")}</div>`;
+    sectionsEl.appendChild(block);
   }
 })();
 </script>

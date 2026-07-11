@@ -1,7 +1,18 @@
-{
-  "name": "SES – All Events",
-  "color": "#0f172a",
-  "calendar_id": "c_151f4cfc3df29722ccdcd70807dfaf89462d649463304e0e77ceab803484a776@group.calendar.google.com",
-  "subscribe_url": "https://calendar.google.com/calendar/u/0/r?cid=c_151f4cfc3df29722ccdcd70807dfaf89462d649463304e0e77ceab803484a776@group.calendar.google.com",
-  "ical_url": "https://calendar.google.com/calendar/ical/c_151f4cfc3df29722ccdcd70807dfaf89462d649463304e0e77ceab803484a776%40group.calendar.google.com/public/basic.ics"
-}
+[
+  {
+    "sheet": "boys",
+    "name": "SES – All Events Boys",
+    "color": "#1e3a8a",
+    "calendar_id": "c_151f4cfc3df29722ccdcd70807dfaf89462d649463304e0e77ceab803484a776@group.calendar.google.com",
+    "subscribe_url": "https://calendar.google.com/calendar/u/0/r?cid=c_151f4cfc3df29722ccdcd70807dfaf89462d649463304e0e77ceab803484a776@group.calendar.google.com",
+    "ical_url": "https://calendar.google.com/calendar/ical/c_151f4cfc3df29722ccdcd70807dfaf89462d649463304e0e77ceab803484a776%40group.calendar.google.com/public/basic.ics"
+  },
+  {
+    "sheet": "girls",
+    "name": "SES – All Events Girls",
+    "color": "#9d174d",
+    "calendar_id": "c_84fd0b0124627fbc40b56d9840de48e579d941984ee38098a47eea19fdddda03@group.calendar.google.com",
+    "subscribe_url": "https://calendar.google.com/calendar/u/0/r?cid=c_84fd0b0124627fbc40b56d9840de48e579d941984ee38098a47eea19fdddda03@group.calendar.google.com",
+    "ical_url": "https://calendar.google.com/calendar/ical/c_84fd0b0124627fbc40b56d9840de48e579d941984ee38098a47eea19fdddda03%40group.calendar.google.com/public/basic.ics"
+  }
+]

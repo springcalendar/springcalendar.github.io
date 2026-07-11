@@ -1,14 +1,13 @@
 """Loader for the single source of truth (../committees.json).
 
-Per committee the JSON provides only: key, name, color, calendar_id.
-This module derives everything else so no value is ever duplicated:
+The workbook is split into two sheets (boys, girls). Each sheet has a `combined`
+mirror calendar and a list of `tabs`; each tab provides key, name, tab (sheet tab
+name), section (general|boys|girls), color, calendar_id. Everything else — iCal
+URL, subscribe link — is derived here so no value is duplicated.
 
-    tab           = name.upper()                 (the Google Sheet tab name)
-    ical_url      = public .ics feed for the calendar (renderer's data source)
-    subscribe_url = one-click "Add to Google Calendar" link
-
-Both render/config.py and tools/gen_config.py import from here, so the derivation
-lives in exactly one place.
+Consumers:
+- tools/gen_config.py: per-sheet _Config.*.csv + Committees.*.gs, and the website
+  config in site/data/*.json.
 """
 
 import json
@@ -32,42 +31,21 @@ def derive_subscribe_url(calendar_id):
     return f"https://calendar.google.com/calendar/u/0/r?cid={calendar_id}"
 
 
-def derive_tab(name):
-    # The sheet tab name matches the display name (Title Case) as-is.
-    return name
+def _expand_tab(t):
+    cid = t.get("calendar_id", "").strip()
+    return {
+        "key": t["key"],
+        "name": t["name"],
+        "tab": t.get("tab", t["name"]),
+        "section": t.get("section", "general"),
+        "color": t["color"],
+        "calendar_id": cid,
+        "ical_url": derive_ical_url(cid),
+        "subscribe_url": derive_subscribe_url(cid),
+    }
 
 
-def load_committees(path=COMMITTEES_JSON):
-    """Return a list of fully-expanded committee dicts."""
-    with open(path, encoding="utf-8") as f:
-        data = json.load(f)
-
-    committees = []
-    for c in data["committees"]:
-        cid = c.get("calendar_id", "").strip()
-        committees.append({
-            "key": c["key"],
-            "name": c["name"],
-            "color": c["color"],
-            "calendar_id": cid,
-            "tab": derive_tab(c["name"]),
-            "ical_url": derive_ical_url(cid),
-            "subscribe_url": derive_subscribe_url(cid),
-        })
-    return committees
-
-
-def load_combined(path=COMMITTEES_JSON):
-    """Return the combined 'SES – All Events' calendar dict, or None if not defined.
-
-    Like committees, only name/color/calendar_id are stored; the iCal + subscribe
-    URLs are derived. `calendar_id` may be blank until the 7th calendar exists.
-    """
-    with open(path, encoding="utf-8") as f:
-        data = json.load(f)
-    c = data.get("combined")
-    if not c:
-        return None
+def _expand_combined(c):
     cid = c.get("calendar_id", "").strip()
     return {
         "name": c["name"],
@@ -78,17 +56,41 @@ def load_combined(path=COMMITTEES_JSON):
     }
 
 
-def load_settings(path=COMMITTEES_JSON):
-    """Site-wide settings for the live website (e.g. the Google Calendar API key)."""
+def _load(path):
     with open(path, encoding="utf-8") as f:
-        data = json.load(f)
+        return json.load(f)
+
+
+def load_sheets(path=COMMITTEES_JSON):
+    """Return per-sheet structure: [{id, name, combined, tabs:[expanded]}]."""
+    data = _load(path)
+    sheets = []
+    for s in data["sheets"]:
+        sheets.append({
+            "id": s["id"],
+            "name": s["name"],
+            "combined": _expand_combined(s["combined"]),
+            "tabs": [_expand_tab(t) for t in s["tabs"]],
+        })
+    return sheets
+
+
+def load_committees(path=COMMITTEES_JSON):
+    """Flat list of every tab across both sheets (for the website)."""
+    out = []
+    for s in load_sheets(path):
+        out.extend(s["tabs"])
+    return out
+
+
+def load_combined(path=COMMITTEES_JSON):
+    """The combined mirror calendars, one per sheet (Boys, Girls)."""
+    return [{"sheet": s["id"], **s["combined"]} for s in load_sheets(path)]
+
+
+def load_settings(path=COMMITTEES_JSON):
+    data = _load(path)
     return {
         "organization": data.get("organization", ""),
         "google_api_key": data.get("google_api_key", ""),
     }
-
-
-def load_meta(path=COMMITTEES_JSON):
-    with open(path, encoding="utf-8") as f:
-        data = json.load(f)
-    return {"organization": data.get("organization", "")}

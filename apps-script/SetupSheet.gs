@@ -265,8 +265,7 @@ function buildConfigTab(ss) {
   // an older Committees.gs (without CONFIG_ROWS) is in the project.
   var data = (typeof CONFIG_ROWS !== 'undefined' && CONFIG_ROWS.length)
     ? CONFIG_ROWS
-    : COMMITTEE_TABS.map(function (c) { return [c.name, '', c.color, '', '']; })
-        .concat([[COMBINED_NAME, '', '#0f172a', '', '']]);
+    : COMMITTEE_TABS.map(function (c) { return [c.name, '', c.color, '', '']; });
 
   var oldRows = Math.max(sheet.getLastRow() - 1, 0);
   if (oldRows > data.length) {

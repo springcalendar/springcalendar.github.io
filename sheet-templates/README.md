@@ -1,41 +1,33 @@
 # Google Sheet templates
 
-Two ways to create the committee workbook. **Option A is recommended** — it builds
-everything (tabs, formatting, dropdowns, protected columns, sample rows) in one click.
+There are **two** workbooks — a **Boys** sheet and a **Girls** sheet. Build each
+with the one-click Apps Script builder (recommended); the CSVs are a fallback.
 
 ## Option A — one-click builder (recommended)
 
+For **each** sheet (Boys, then Girls):
 1. Create a new blank Google Sheet (sheets.new).
-2. **Extensions → Apps Script**. Paste **both** [`../apps-script/Code.gs`](../apps-script/Code.gs)
-   and [`../apps-script/SetupSheet.gs`](../apps-script/SetupSheet.gs) into the project
-   (use the **+** to add a second script file). Save.
-3. Reload the Sheet. A new **"SES Calendar"** menu appears →
-   **Set up / repair sheet**. Approve the permission prompt.
-4. Done — all 6 committee tabs + `_Config` are built and formatted.
-   Then use the same menu → **Install auto-sync triggers** once.
+2. **Extensions → Apps Script.** Add three files:
+   [`../apps-script/Code.gs`](../apps-script/Code.gs),
+   [`../apps-script/SetupSheet.gs`](../apps-script/SetupSheet.gs), and the matching
+   **`Committees.boys.gs`** or **`Committees.girls.gs`** (paste it into a file named
+   `Committees`). Save.
+3. Reload the Sheet → **SES Calendar → Set up / repair sheet**. Approve the prompt.
+   It builds that sheet's tabs + `_Config` (with Calendar IDs baked in).
+4. Same menu → **Install auto-sync triggers** once.
 
-Re-running "Set up / repair sheet" is safe — it only adds what's missing.
+Re-running "Set up / repair sheet" is safe — it only adds/repairs what's needed.
 
 ## Option B — manual CSV import
+Import [`_Config.boys.csv`](_Config.boys.csv) / [`_Config.girls.csv`](_Config.girls.csv)
+into the matching sheet's `_Config` tab, and [`committee-template.csv`](committee-template.csv)
+for each group tab (rename to the tab names below). CSV import doesn't carry
+formatting/dropdowns/protection — run "Set up / repair sheet" afterward to apply them.
 
-1. Create a new Google Sheet.
-2. For each committee: **File → Import → Upload** [`committee-template.csv`](committee-template.csv)
-   → **Insert new sheet(s)** → rename the tab to the committee name (exact names below).
-   Repeat 6 times.
-3. Import [`_Config.csv`](_Config.csv) the same way; rename that tab to `_Config`.
-4. Delete the empty default `Sheet1`.
-
-> CSV import does **not** carry formatting, the Repeat dropdown, or column
-> protection — Option A does. After a CSV import you can still run the Apps Script
-> "Set up / repair sheet" to apply all of that on top.
-
-### Exact committee tab names
-- `COLLEGE / UNIVERSITY (MEN)`
-- `COLLEGE / UNIVERSITY (WOMEN)`
-- `HIGH SCHOOL BOYS`
-- `HIGH SCHOOL GIRLS`
-- `MIDDLE SCHOOL BOYS`
-- `MIDDLE SCHOOL GIRLS`
+### Tab names
+**Boys sheet:** `Special Days`, `General Events`, `University Men`,
+`High School Boy`, `Middle School Boy`
+**Girls sheet:** `University Women`, `High School Girl`, `Middle School Girl`
 
 ### Columns
 | A | B | C | D | E | F | G | H | I | J | K | L |
@@ -43,8 +35,7 @@ Re-running "Set up / repair sheet" is safe — it only adds what's missing.
 | Event Title | Start Date | Start Time | End Date | End Time | Location | Description | Repeat | Repeat Until | 🔒 Event ID | 🔒 Last Synced | 🔒 Status |
 
 - Leave **Start Time blank** for an all-day event.
-- Leave **End Date blank** for single-day events; fill it in for **multi-day**
-  events (e.g. a 3-day camp) — enter the actual last day.
+- Leave **End Date blank** for single-day; fill it in for multi-day events.
 - **Repeat** = `None` / `Weekly` / `Monthly`; set **Repeat Until** for repeating events.
-- **Columns J–L are filled automatically by the sync script — don't edit them.**
+- **Columns J–L are auto-managed — don't edit them.**
 - To **remove** an event, clear its row's cells (don't delete the whole row).

@@ -24,6 +24,11 @@
   </nav>
 </header>
 
+<!-- Boys / Girls / General switch -->
+<div class="switch-wrap">
+  <div class="switch" id="view-switch"></div>
+</div>
+
 <main class="layout">
   <aside class="sidebar">
     <h2>Groups</h2>
@@ -51,7 +56,17 @@
 
 <script>
 const DATA = "data/";
-const byKey = {};   // committee key -> {name, color}
+const byKey = {};
+
+// Which sections each view shows. General = everything; Boys/Girls overlay General.
+const VIEWS = [
+  { id: "general", label: "General", sections: ["general", "boys", "girls"] },
+  { id: "boys",    label: "Boys",    sections: ["boys", "general"] },
+  { id: "girls",   label: "Girls",   sections: ["girls", "general"] },
+];
+const DEFAULT_VIEW = "general";
+
+let calendar, committees = [], apiKey = "";
 
 async function loadJSON(path) {
   const res = await fetch(path, { cache: "no-store" });
@@ -71,41 +86,32 @@ function fmtWhen(ev) {
 }
 
 function source(c) {
-  // A live Google Calendar event source — the browser reads events directly
-  // from Google, so the site is always current (no rebuild needed).
   return { id: c.key, googleCalendarId: c.calendar_id, color: c.color };
 }
 
-(async function () {
-  const [committees, settings] = await Promise.all([
-    loadJSON(DATA + "committees.json"),
-    loadJSON(DATA + "settings.json").catch(() => ({})),
-  ]);
-  committees.forEach((c) => { byKey[c.key] = c; });
+function committeesForView(viewId) {
+  const view = VIEWS.find((v) => v.id === viewId);
+  return committees.filter((c) => view.sections.includes(c.section) && c.calendar_id);
+}
 
-  const calendarEl = document.getElementById("calendar");
+function setView(viewId) {
+  // Highlight the active switch button.
+  document.querySelectorAll("#view-switch button").forEach((b) =>
+    b.classList.toggle("active", b.dataset.view === viewId));
+
+  // Swap the calendar's live sources to this view's committees.
+  calendar.getEventSources().forEach((s) => s.remove());
+  const items = committeesForView(viewId);
+  if (apiKey) items.forEach((c) => calendar.addEventSource(source(c)));
+
+  // Rebuild the toggle list for this view.
   const togglesEl = document.getElementById("committee-toggles");
-  const apiKey = settings.google_api_key || "";
-
-  const calendar = new FullCalendar.Calendar(calendarEl, {
-    initialView: "dayGridMonth",
-    height: "auto",
-    headerToolbar: { left: "prev,next today", center: "title", right: "dayGridMonth,listMonth" },
-    dayMaxEvents: 4,
-    googleCalendarApiKey: apiKey,
-    eventSources: apiKey ? committees.filter((c) => c.calendar_id).map(source) : [],
-    eventClick: function (info) {
-      info.jsEvent.preventDefault(); // don't open the Google event page
-      showModal(info.event);
-    },
-  });
-
-  // Toggle a committee's live source on/off.
-  for (const c of committees) {
+  togglesEl.innerHTML = "";
+  for (const c of items) {
     const label = document.createElement("label");
     label.className = "toggle";
     label.innerHTML =
-      `<input type="checkbox" ${apiKey && c.calendar_id ? "checked" : ""} ${apiKey && c.calendar_id ? "" : "disabled"}>
+      `<input type="checkbox" ${apiKey ? "checked" : "disabled"}>
        <span class="swatch" style="background:${c.color}"></span>
        <span class="toggle-name">${c.name}</span>`;
     label.querySelector("input").addEventListener("change", (e) => {
@@ -114,6 +120,35 @@ function source(c) {
     });
     togglesEl.appendChild(label);
   }
+}
+
+(async function () {
+  const [committeesData, settings] = await Promise.all([
+    loadJSON(DATA + "committees.json"),
+    loadJSON(DATA + "settings.json").catch(() => ({})),
+  ]);
+  committees = committeesData;
+  committees.forEach((c) => { byKey[c.key] = c; });
+  apiKey = settings.google_api_key || "";
+
+  // Build the switch buttons.
+  const switchEl = document.getElementById("view-switch");
+  VIEWS.forEach((v) => {
+    const b = document.createElement("button");
+    b.textContent = v.label;
+    b.dataset.view = v.id;
+    b.addEventListener("click", () => setView(v.id));
+    switchEl.appendChild(b);
+  });
+
+  calendar = new FullCalendar.Calendar(document.getElementById("calendar"), {
+    initialView: "dayGridMonth",
+    height: "auto",
+    headerToolbar: { left: "prev,next today", center: "title", right: "dayGridMonth,listMonth" },
+    dayMaxEvents: 4,
+    googleCalendarApiKey: apiKey,
+    eventClick: function (info) { info.jsEvent.preventDefault(); showModal(info.event); },
+  });
 
   if (!apiKey) {
     const n = document.getElementById("notice");
@@ -121,15 +156,16 @@ function source(c) {
     n.textContent = "Live calendar not configured yet — add a Google Calendar API key in committees.json (google_api_key), regenerate, and redeploy.";
   }
 
+  setView(DEFAULT_VIEW);
   calendar.render();
 })();
 
 // Modal
 const modal = document.getElementById("modal");
 function showModal(ev) {
-  const committee = byKey[ev.source ? ev.source.id : ""] || {};
+  const c = byKey[ev.source ? ev.source.id : ""] || {};
   document.getElementById("modal-title").textContent = ev.title;
-  document.getElementById("modal-committee").textContent = committee.name || "";
+  document.getElementById("modal-committee").textContent = c.name || "";
   document.getElementById("modal-committee").style.color = ev.backgroundColor || "#334155";
   document.getElementById("modal-when").textContent = fmtWhen(ev);
   const where = ev.extendedProps.location;

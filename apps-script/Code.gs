@@ -33,7 +33,15 @@ var CONFIG_SHEET = '_Config';
 var SYNC_TAG = 'ses_sync';   // marks events we manage
 var HASH_TAG = 'ses_hash';   // content hash for change detection
 var SRC_TAG = 'ses_src';     // on combined-calendar mirrors: source committee event id
-var COMBINED_NAME = 'SES – All Events'; // _Config row for the combined calendar (en dash)
+// The _Config row whose Committee name starts with this prefix is THIS sheet's
+// combined mirror calendar. So the Boys sheet auto-targets "SES – All Events Boys"
+// and the Girls sheet "SES – All Events Girls" using the exact same code (en dash).
+var COMBINED_PREFIX = 'SES – All Events';
+
+/** True if a _Config committee name is the combined mirror row (not a real tab). */
+function isCombinedName_(name) {
+  return String(name).indexOf(COMBINED_PREFIX) === 0;
+}
 
 // ===========================================================================
 // Triggers
@@ -84,11 +92,11 @@ function onEditSync(e) {
 /** Sync every committee tab listed in _Config, then mirror into the combined calendar. */
 function syncAll() {
   var map = readConfig();
-  var combined = map[COMBINED_NAME];
+  var combined = null;
   var live = []; // { id: committeeEventId, ev: parsedEvent } across all committees
 
   Object.keys(map).forEach(function (sheetName) {
-    if (sheetName === COMBINED_NAME) return; // combined row has no committee tab
+    if (isCombinedName_(sheetName)) { combined = map[sheetName]; return; } // mirror target, not a tab
     try {
       var synced = syncSheet(sheetName, map[sheetName].calendarId);
       for (var i = 0; i < synced.length; i++) live.push(synced[i]);

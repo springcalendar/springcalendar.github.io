@@ -51,6 +51,28 @@ a { color: inherit; }
 }
 .site-nav a.active { background: var(--ink); color: #fff; }
 
+/* Boys / Girls / General switch */
+.switch-wrap { max-width: 1280px; margin: 0 auto; padding: 20px 28px 0; }
+.switch {
+  display: inline-flex;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 4px;
+  gap: 2px;
+}
+.switch button {
+  border: none;
+  background: none;
+  padding: 8px 22px;
+  border-radius: 999px;
+  font-weight: 700;
+  font-size: 14px;
+  color: var(--muted);
+  cursor: pointer;
+}
+.switch button.active { background: var(--ink); color: #fff; }
+
 /* Calendar layout */
 .layout {
   display: grid;
@@ -145,6 +167,14 @@ a { color: inherit; }
 .all-banner p { margin: 4px 0 0; color: #cbd5e1; font-size: 14px; }
 .all-actions { display: flex; gap: 10px; flex-wrap: wrap; }
 .all-note { color: var(--muted); font-size: 13px; margin: 10px 2px 0; }
+.combined-cards { display: grid; gap: 14px; margin-top: 24px; }
+.sub-section { margin-top: 30px; }
+.sub-heading {
+  font-size: 18px;
+  margin: 0 0 12px;
+  padding-bottom: 6px;
+  border-bottom: 2px solid var(--line);
+}
 
 .cards {
   display: grid;
@@ -181,6 +211,8 @@ a { color: inherit; }
   .subscribe { padding: 18px 16px; }
   .site-header { padding: 16px; }
   .calendar-wrap { padding: 10px; }
+  .switch-wrap { padding: 16px 16px 0; }
+  .switch button { padding: 8px 18px; }
 
   /* FullCalendar: stack the toolbar and shrink controls so nothing overflows */
   .fc .fc-toolbar.fc-header-toolbar {
