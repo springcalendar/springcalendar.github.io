@@ -12,9 +12,10 @@
  */
 
 // A trailing " *" marks a required column (Event Title and Start Date).
+// Auto columns are last: Status, Last Synced, then Event ID (hidden).
 var HEADERS = [
   'Event Title *', 'Start Date *', 'Start Time', 'End Date', 'End Time', 'Location',
-  'Description', 'Repeat', 'Repeat Until', '🔒 Event ID', '🔒 Last Synced', '🔒 Status'
+  'Description', 'Repeat', 'Repeat Until', '🔒 Status', '🔒 Last Synced', '🔒 Event ID'
 ];
 
 // How many rows get the live formatting/validation. Keep this modest — applying
@@ -46,7 +47,7 @@ function onOpen() {
     .addToUi();
 }
 
-/** Build/repair every committee tab and the _Config tab. */
+/** Build/repair every committee tab (Calendar IDs come from CONFIG_ROWS in Committees.gs). */
 function setupSheet() {
   var ss = SpreadsheetApp.getActive();
 
@@ -61,7 +62,9 @@ function setupSheet() {
     }
   });
 
-  buildConfigTab(ss);
+  // The old _Config tab is no longer used — Code.gs reads CONFIG_ROWS directly.
+  var cfg = ss.getSheetByName('_Config');
+  if (cfg) ss.deleteSheet(cfg);
 
   // Remove the default "Sheet1" if it's still empty.
   var def = ss.getSheetByName('Sheet1');
@@ -102,11 +105,13 @@ function formatCommitteeTab(sheet, accent) {
   sheet.getRange(1, COL.START_TIME).setNote('Leave blank for an all-day event.\nUse 24-hour time, e.g. 18:30 = 6:30 PM.');
   sheet.getRange(1, COL.END_DATE).setNote('Leave blank for single-day events.\nFill in for multi-day events (e.g. a 3-day camp) — enter the actual last day.');
   sheet.getRange(1, COL.REPEAT).setNote('None, Weekly, or Monthly.');
-  sheet.getRange(1, COL.EVENT_ID).setNote('Filled in automatically by the sync — please do not edit columns J, K, L.');
+  sheet.getRange(1, COL.STATUS).setNote('Auto-filled by the sync — don\'t edit Status, Last Synced, or the hidden Event ID column.');
 
   // --- Column widths ----------------------------------------------------
-  var widths = [240, 130, 100, 130, 100, 170, 280, 100, 130, 220, 150, 150];
+  // A..I event data, then Status, Last Synced, Event ID (hidden).
+  var widths = [240, 130, 100, 130, 100, 170, 280, 100, 130, 150, 160, 220];
   for (var i = 0; i < widths.length; i++) sheet.setColumnWidth(i + 1, widths[i]);
+  sheet.hideColumns(COL.EVENT_ID); // needed by the sync, hidden from humans
 
   // --- Alternating row bands on the editable columns (A:I) --------------
   sheet.getBandings().forEach(function (b) { b.remove(); });
@@ -170,13 +175,13 @@ function formatCommitteeTab(sheet, accent) {
       .setBackground('#fde0e0').setRanges([startCol]).build()
   ]);
 
-  // --- Auto-managed columns I:K: grey + protect (warning-only) ----------
-  sheet.getRange(2, COL.EVENT_ID, rows, 3)
+  // --- Auto-managed columns (Status, Last Synced, Event ID): grey + protect --
+  sheet.getRange(2, COL.STATUS, rows, 3)
        .setBackground('#eef1f5').setFontColor('#9aa6b2').setHorizontalAlignment('center');
   var hasProtection = sheet.getProtections(SpreadsheetApp.ProtectionType.RANGE)
     .some(function (p) { return p.getDescription() === 'Auto-managed (do not edit)'; });
   if (!hasProtection) {
-    sheet.getRange(2, COL.EVENT_ID, rows, 3).protect()
+    sheet.getRange(2, COL.STATUS, rows, 3).protect()
       .setDescription('Auto-managed (do not edit)').setWarningOnly(true);
   }
 
@@ -243,48 +248,3 @@ function pad2_(n) {
   return (n < 10 ? '0' : '') + n;
 }
 
-/** Create + pre-fill the _Config tab. */
-function buildConfigTab(ss) {
-  var sheet = ss.getSheetByName('_Config') || ss.insertSheet('_Config');
-  var headers = ['Committee', 'CalendarId', 'Color', 'iCalURL', 'SubscribeURL'];
-
-  sheet.getRange(1, 1, 1, headers.length)
-       .setValues([headers])
-       .setFontWeight('bold')
-       .setFontColor('#ffffff')
-       .setBackground('#0f172a')
-       .setHorizontalAlignment('center')
-       .setVerticalAlignment('middle');
-  sheet.setRowHeight(1, 36);
-  sheet.setFrozenRows(1);
-  sheet.getRange(1, 2).setNote('Calendar IDs are generated from committees.json — edit there and re-run the generator, not here.');
-
-  // Write the data rows from the generated CONFIG_ROWS (single source of truth:
-  // committees.json → tools/gen_config.py → Committees.gs). This bakes in the
-  // Calendar IDs + derived iCal/subscribe URLs. Falls back to name+color only if
-  // an older Committees.gs (without CONFIG_ROWS) is in the project.
-  var data = (typeof CONFIG_ROWS !== 'undefined' && CONFIG_ROWS.length)
-    ? CONFIG_ROWS
-    : COMMITTEE_TABS.map(function (c) { return [c.name, '', c.color, '', '']; });
-
-  var oldRows = Math.max(sheet.getLastRow() - 1, 0);
-  if (oldRows > data.length) {
-    sheet.getRange(2, 1, oldRows, headers.length).clearContent();
-  }
-  sheet.getRange(2, 1, data.length, headers.length).setValues(data);
-
-  var widths = [260, 340, 90, 380, 380];
-  for (var i = 0; i < widths.length; i++) sheet.setColumnWidth(i + 1, widths[i]);
-
-  var nRows = data.length;
-  sheet.getBandings().forEach(function (b) { b.remove(); });
-  sheet.getRange(2, 1, nRows, headers.length)
-       .applyRowBanding(SpreadsheetApp.BandingTheme.LIGHT_GREY, false, false)
-       .setFirstRowColor('#ffffff').setSecondRowColor('#f3f6fb');
-  sheet.getRange(1, 1, nRows + 1, headers.length)
-       .setBorder(true, true, true, true, true, true, '#dbe2ea', SpreadsheetApp.BorderStyle.SOLID);
-
-  // Move _Config to the end.
-  ss.setActiveSheet(sheet);
-  ss.moveActiveSheet(ss.getSheets().length);
-}

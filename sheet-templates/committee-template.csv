@@ -1,4 +1,4 @@
-Event Title *,Start Date *,Start Time,End Date,End Time,Location,Description,Repeat,Repeat Until,Event ID,Last Synced,Status
+Event Title *,Start Date *,Start Time,End Date,End Time,Location,Description,Repeat,Repeat Until,Status,Last Synced,Event ID
 Weekly Study Circle,2026-07-07,18:30,,20:00,Main Hall,Bring your notebooks.,Weekly,2026-08-25,,,
 Guest Speaker Night,2026-07-15,19:00,,20:30,Room 204,Special guest TBA.,None,,,,
 Community Service Day,2026-07-22,,,,City Park,All-day event — leave Start Time blank for all-day.,None,,,,

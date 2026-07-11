@@ -19,10 +19,12 @@ For **each** sheet (Boys, then Girls):
 Re-running "Set up / repair sheet" is safe — it only adds/repairs what's needed.
 
 ## Option B — manual CSV import
-Import [`_Config.boys.csv`](_Config.boys.csv) / [`_Config.girls.csv`](_Config.girls.csv)
-into the matching sheet's `_Config` tab, and [`committee-template.csv`](committee-template.csv)
-for each group tab (rename to the tab names below). CSV import doesn't carry
-formatting/dropdowns/protection — run "Set up / repair sheet" afterward to apply them.
+Import [`committee-template.csv`](committee-template.csv) for each group tab
+(rename to the tab names below). CSV import doesn't carry formatting/dropdowns/
+protection — run "Set up / repair sheet" afterward to apply them.
+
+> There is **no `_Config` tab** — the Calendar IDs are baked into `Committees.gs`
+> (`CONFIG_ROWS`) and read directly by `Code.gs`.
 
 ### Tab names
 **Boys sheet:** `Special Days`, `General Events`, `University Men`,
@@ -32,10 +34,10 @@ formatting/dropdowns/protection — run "Set up / repair sheet" afterward to app
 ### Columns
 | A | B | C | D | E | F | G | H | I | J | K | L |
 |---|---|---|---|---|---|---|---|---|---|---|---|
-| Event Title | Start Date | Start Time | End Date | End Time | Location | Description | Repeat | Repeat Until | 🔒 Event ID | 🔒 Last Synced | 🔒 Status |
+| Event Title | Start Date | Start Time | End Date | End Time | Location | Description | Repeat | Repeat Until | 🔒 Status | 🔒 Last Synced | 🔒 Event ID *(hidden)* |
 
 - Leave **Start Time blank** for an all-day event.
 - Leave **End Date blank** for single-day; fill it in for multi-day events.
 - **Repeat** = `None` / `Weekly` / `Monthly`; set **Repeat Until** for repeating events.
-- **Columns J–L are auto-managed — don't edit them.**
+- **Columns J–L are auto-managed — don't edit them.** Event ID (L) is hidden.
 - To **remove** an event, clear its row's cells (don't delete the whole row).

@@ -24,12 +24,12 @@ var COL = {
   DESCRIPTION: 7,  // G
   REPEAT: 8,       // H  (None | Weekly | Monthly)
   REPEAT_UNTIL: 9, // I
-  EVENT_ID: 10,    // J  (auto)
-  LAST_SYNCED: 11, // K  (auto)
-  STATUS: 12       // L  (auto)
+  STATUS: 10,      // J  (auto — shown first, right after the event data)
+  LAST_SYNCED: 11, // K  (auto — shown)
+  EVENT_ID: 12     // L  (auto — hidden; needed for the sync, not for humans)
 };
+var NUM_COLS = 12;
 var FIRST_DATA_ROW = 2;
-var CONFIG_SHEET = '_Config';
 var SYNC_TAG = 'ses_sync';   // marks events we manage
 var HASH_TAG = 'ses_hash';   // content hash for change detection
 var SRC_TAG = 'ses_src';     // on combined-calendar mirrors: source committee event id
@@ -73,7 +73,7 @@ function onEditSync(e) {
   var map = readConfig();
   var cfg = map[sheet.getName()];
   if (!cfg) return;                                   // not a committee tab
-  if (e.range.getColumn() >= COL.EVENT_ID) return;    // ignore auto-managed cols I:K
+  if (e.range.getColumn() >= COL.STATUS) return;      // ignore edits to auto cols (Status, Last Synced, Event ID)
 
   var calendar = CalendarApp.getCalendarById(cfg.calendarId);
   if (!calendar) return;
@@ -89,7 +89,7 @@ function onEditSync(e) {
 // Sync
 // ===========================================================================
 
-/** Sync every committee tab listed in _Config, then mirror into the combined calendar. */
+/** Sync every committee tab in CONFIG_ROWS, then mirror into the combined calendar. */
 function syncAll() {
   var map = readConfig();
   var combined = null;
@@ -130,7 +130,7 @@ function syncSheet(sheetName, calendarId) {
 
   if (lastRow >= FIRST_DATA_ROW) {
     // Read the whole data block in ONE call instead of row-by-row.
-    var data = sheet.getRange(FIRST_DATA_ROW, 1, lastRow - FIRST_DATA_ROW + 1, COL.STATUS)
+    var data = sheet.getRange(FIRST_DATA_ROW, 1, lastRow - FIRST_DATA_ROW + 1, NUM_COLS)
                     .getValues();
     for (var i = 0; i < data.length; i++) {
       var res = syncSheetRow(sheet, calendar, FIRST_DATA_ROW + i, liveIds, data[i]);
@@ -148,7 +148,7 @@ function syncSheet(sheetName, calendarId) {
  * Returns { id, ev } for a live row, or null otherwise.
  */
 function syncSheetRow(sheet, calendar, row, liveIds, values) {
-  if (!values) values = sheet.getRange(row, 1, 1, COL.STATUS).getValues()[0];
+  if (!values) values = sheet.getRange(row, 1, 1, NUM_COLS).getValues()[0];
   var ev = parseRow(values);
   var eventId = String(values[COL.EVENT_ID - 1] || '').trim();
 
@@ -458,24 +458,29 @@ function writeStatus(sheet, row, msg) {
 }
 
 function clearAutoCols(sheet, row) {
-  sheet.getRange(row, COL.EVENT_ID, 1, 3).clearContent();
+  sheet.getRange(row, COL.STATUS, 1, 3).clearContent(); // Status, Last Synced, Event ID
 }
 
-/** Read _Config into { committeeTabName: {calendarId, color, icalUrl, subscribeUrl} }. */
+/**
+ * Read the tab → calendar mapping straight from CONFIG_ROWS (defined in the
+ * generated Committees.gs). No _Config tab needed — the Calendar IDs are baked
+ * into the script. Returns { committeeTabName: {calendarId, color, icalUrl, subscribeUrl} }.
+ */
 function readConfig() {
-  var sheet = SpreadsheetApp.getActive().getSheetByName(CONFIG_SHEET);
-  if (!sheet) throw new Error('Missing "' + CONFIG_SHEET + '" tab');
-  var rows = sheet.getDataRange().getValues();
   var map = {};
-  for (var i = 1; i < rows.length; i++) { // skip header
-    var name = String(rows[i][0] || '').trim();
-    var calendarId = String(rows[i][1] || '').trim();
+  if (typeof CONFIG_ROWS === 'undefined') {
+    throw new Error('Missing Committees.gs (CONFIG_ROWS). Paste this sheet\'s Committees.*.gs.');
+  }
+  for (var i = 0; i < CONFIG_ROWS.length; i++) {
+    var r = CONFIG_ROWS[i];
+    var name = String(r[0] || '').trim();
+    var calendarId = String(r[1] || '').trim();
     if (!name || !calendarId) continue;
     map[name] = {
       calendarId: calendarId,
-      color: String(rows[i][2] || '').trim(),
-      icalUrl: String(rows[i][3] || '').trim(),
-      subscribeUrl: String(rows[i][4] || '').trim()
+      color: String(r[2] || '').trim(),
+      icalUrl: String(r[3] || '').trim(),
+      subscribeUrl: String(r[4] || '').trim()
     };
   }
   return map;

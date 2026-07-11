@@ -5,8 +5,9 @@ Run after editing committees.json:
     python tools/gen_config.py
 
 It rewrites, per sheet (boys, girls):
-  - sheet-templates/_Config.<sheet>.csv   -> import into that sheet's _Config tab
   - apps-script/Committees.<sheet>.gs     -> paste into that sheet's Apps Script
+    (holds COMMITTEE_TABS + CONFIG_ROWS; Code.gs reads the calendar mapping from
+    CONFIG_ROWS directly, so there is no _Config tab)
 
 ...and for the website:
   - site/data/committees.json             -> every tab (with section) for the switch
@@ -16,7 +17,6 @@ It rewrites, per sheet (boys, girls):
 Pure Python standard library only — no credentials, no third-party deps.
 """
 
-import csv
 import json
 import os
 import sys
@@ -26,11 +26,8 @@ sys.path.insert(0, os.path.join(ROOT, "render"))
 
 from committees import load_sheets, load_committees, load_combined, load_settings  # noqa: E402
 
-SHEET_TEMPLATES = os.path.join(ROOT, "sheet-templates")
 APPS_SCRIPT = os.path.join(ROOT, "apps-script")
 SITE_DATA = os.path.join(ROOT, "site", "data")
-
-CONFIG_HEADER = ["Committee", "CalendarId", "Color", "iCalURL", "SubscribeURL"]
 
 
 def _js(s):
@@ -39,22 +36,13 @@ def _js(s):
 
 
 def _config_rows(sheet):
-    """The _Config rows for one sheet: its tabs, then its combined mirror row."""
+    """The mapping rows for one sheet: its tabs, then its combined mirror row.
+    Baked into Committees.gs as CONFIG_ROWS and read directly by Code.gs."""
     rows = [[t["tab"], t["calendar_id"], t["color"], t["ical_url"], t["subscribe_url"]]
             for t in sheet["tabs"]]
     c = sheet["combined"]
     rows.append([c["name"], c["calendar_id"], c["color"], c["ical_url"], c["subscribe_url"]])
     return rows
-
-
-def write_config_csv(sheet):
-    os.makedirs(SHEET_TEMPLATES, exist_ok=True)
-    path = os.path.join(SHEET_TEMPLATES, f"_Config.{sheet['id']}.csv")
-    with open(path, "w", newline="", encoding="utf-8") as f:
-        w = csv.writer(f)
-        w.writerow(CONFIG_HEADER)
-        w.writerows(_config_rows(sheet))
-    print(f"  wrote {os.path.relpath(path, ROOT)}")
 
 
 def write_committees_gs(sheet):
@@ -126,7 +114,6 @@ def main():
     print(f"Generating config for {len(sheets)} sheets:")
     for sheet in sheets:
         print(f"  [{sheet['name']}] {len(sheet['tabs'])} tabs")
-        write_config_csv(sheet)
         write_committees_gs(sheet)
     write_site_config(load_committees(), load_combined(), load_settings())
     print("Done. Paste each Committees.<sheet>.gs into the matching sheet's Apps "

@@ -38,17 +38,18 @@ access). In **each**: **Extensions → Apps Script** → paste `apps-script/Code
 `apps-script/SetupSheet.gs`, and **that sheet's** `apps-script/Committees.boys.gs`
 or `Committees.girls.gs` (rename the file to `Committees` in the editor). **Save**.
 Reload the sheet → **SES Calendar → Set up / repair sheet** — it builds that sheet's
-tabs and fills its `_Config` with the right Calendar IDs automatically.
+tabs. The Calendar IDs are baked into `Committees.gs` (`CONFIG_ROWS`) and read
+directly by `Code.gs`, so there's **no `_Config` tab** to manage.
 
 Each tab's columns:
 
 | A | B | C | D | E | F | G | H | I | J | K | L |
 |---|---|---|---|---|---|---|---|---|---|---|---|
-| Event Title `*` | Start Date `*` | Start Time | End Date | End Time | Location | Description | Repeat | Repeat Until | 🔒 Event ID | 🔒 Last Synced | 🔒 Status |
+| Event Title `*` | Start Date `*` | Start Time | End Date | End Time | Location | Description | Repeat | Repeat Until | 🔒 Status | 🔒 Last Synced | 🔒 Event ID *(hidden)* |
 
 - **Required** (`*`): Event Title and Start Date. **End Date** blank = single-day.
   **Start Time** blank = all-day. **Repeat**: None / Weekly / Monthly.
-- Columns J–L are auto-managed — don't edit.
+- Columns J–L are auto-managed — don't edit. Event ID (L) is hidden from view.
 
 ### 2. Public calendars
 Each tab syncs to a Google Calendar, plus two combined mirrors. All must be
@@ -87,15 +88,15 @@ committees.json              SINGLE SOURCE OF TRUTH (two sheets, tabs, sections,
 apps-script/
   Code.gs                    Sheet → Calendar sync + combined mirror (same in both sheets)
   SetupSheet.gs              sheet builder / repairer (same in both sheets)
-  Committees.boys.gs         generated: Boys sheet's tabs + _Config rows
-  Committees.girls.gs        generated: Girls sheet's tabs + _Config rows
+  Committees.boys.gs         generated: Boys sheet's tabs + CONFIG_ROWS (calendar mapping)
+  Committees.girls.gs        generated: Girls sheet's tabs + CONFIG_ROWS
 render/committees.py         config loader (used by the generator)
-tools/gen_config.py          committees.json → _Config.*.csv, Committees.*.gs, site/data/*.json
+tools/gen_config.py          committees.json → Committees.*.gs + site/data/*.json
 site/                        the static website (GitHub Pages root)
   index.html                 live calendar with Boys/Girls/General switch
   subscribe.html             subscribe links, grouped by section
   data/                      generated config JSON (committees, combined, settings)
-sheet-templates/             _Config.boys.csv, _Config.girls.csv (CSV import fallback)
+sheet-templates/             committee-template.csv (CSV import fallback)
 .github/workflows/build.yml  publishes site/ to GitHub Pages on push
 ```
 
@@ -108,8 +109,8 @@ tab names are derived.
 
 **To change anything:**
 1. Edit [`committees.json`](committees.json).
-2. Run `python tools/gen_config.py` — regenerates `_Config.{boys,girls}.csv`,
-   `Committees.{boys,girls}.gs`, and `site/data/*.json`.
+2. Run `python tools/gen_config.py` — regenerates `Committees.{boys,girls}.gs`
+   and `site/data/*.json`.
 3. If a sheet's tabs changed: paste its new `Committees.*.gs` into that sheet's
    Apps Script and run **Set up / repair sheet**.
 4. `git add . && git commit -m "..." && git push` → the site redeploys.
