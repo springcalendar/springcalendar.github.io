@@ -421,15 +421,22 @@ function exclusiveEnd_(endDate) {
   return d;
 }
 
-/** Combine a date cell with a time cell (Date or "HH:MM" string). */
+/** Combine a date cell with a time cell (Date, "6:30 PM", or "18:30"). */
 function combine(date, time) {
   var d = new Date(date.getTime());
   if (time instanceof Date) {
     d.setHours(time.getHours(), time.getMinutes(), 0, 0);
-  } else {
-    var parts = String(time).split(':');
-    d.setHours(parseInt(parts[0], 10) || 0, parseInt(parts[1], 10) || 0, 0, 0);
+    return d;
   }
+  var s = String(time).trim().toUpperCase();
+  var mer = s.indexOf('PM') >= 0 ? 'PM' : (s.indexOf('AM') >= 0 ? 'AM' : null);
+  s = s.replace(/AM|PM/g, '').trim();
+  var parts = s.split(':');
+  var hh = parseInt(parts[0], 10) || 0;
+  var mm = parseInt(parts[1], 10) || 0;
+  if (mer === 'PM' && hh < 12) hh += 12;   // 6 PM -> 18
+  if (mer === 'AM' && hh === 12) hh = 0;   // 12 AM -> 0
+  d.setHours(hh, mm, 0, 0);
   return d;
 }
 

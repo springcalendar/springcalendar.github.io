@@ -58,7 +58,7 @@
 const DATA = "data/";
 const byKey = {};
 
-// Which sections each view shows. General = everything; Boys/Girls overlay General.
+// Which sections each GROUP view shows. General = everything; Boys/Girls overlay General.
 const VIEWS = [
   { id: "general", label: "General", sections: ["general", "boys", "girls"] },
   { id: "boys",    label: "Boys",    sections: ["boys", "general"] },
@@ -66,7 +66,17 @@ const VIEWS = [
 ];
 const DEFAULT_VIEW = "general";
 
+// CALENDAR views (how the events are laid out) — friendly key -> FullCalendar view.
+const CAL_VIEWS = {
+  month:    "dayGridMonth",
+  week:     "timeGridWeek",
+  year:     "multiMonthYear",
+  upcoming: "listUpcoming",   // custom: rolling agenda, defined in `views` below
+};
+const DEFAULT_CAL = "month";
+
 let calendar, committees = [], apiKey = "";
+let curGroup = DEFAULT_VIEW, curCal = DEFAULT_CAL;
 
 async function loadJSON(path) {
   const res = await fetch(path, { cache: "no-store" });
@@ -94,7 +104,27 @@ function committeesForView(viewId) {
   return committees.filter((c) => view.sections.includes(c.section) && c.calendar_id);
 }
 
+/** The group named in ?view=..., or the default if missing/unknown. */
+function viewFromUrl() {
+  const q = (new URLSearchParams(location.search).get("view") || "").toLowerCase();
+  return VIEWS.some((v) => v.id === q) ? q : DEFAULT_VIEW;
+}
+
+/** The calendar layout named in ?cal=..., or the default if missing/unknown. */
+function calFromUrl() {
+  const q = (new URLSearchParams(location.search).get("cal") || "").toLowerCase();
+  return CAL_VIEWS[q] ? q : DEFAULT_CAL;
+}
+
+/** Keep the address bar in sync so the current group + layout is a shareable link. */
+function updateUrl() {
+  history.replaceState({}, "", `?view=${curGroup}&cal=${curCal}`);
+}
+
 function setView(viewId) {
+  curGroup = viewId;
+  updateUrl();
+
   // Highlight the active switch button.
   document.querySelectorAll("#view-switch button").forEach((b) =>
     b.classList.toggle("active", b.dataset.view === viewId));
@@ -141,13 +171,42 @@ function setView(viewId) {
     switchEl.appendChild(b);
   });
 
+  curCal = calFromUrl();
+
   calendar = new FullCalendar.Calendar(document.getElementById("calendar"), {
-    initialView: "dayGridMonth",
+    initialView: CAL_VIEWS[curCal],
     height: "auto",
-    headerToolbar: { left: "prev,next today", center: "title", right: "dayGridMonth,listMonth" },
+    headerToolbar: {
+      left: "prev,next today",
+      center: "title",
+      right: "dayGridMonth,timeGridWeek,multiMonthYear,listUpcoming",
+    },
+    buttonText: { today: "Today", month: "Month", week: "Week", year: "Year" },
+    views: {
+      // A rolling agenda — unlike listMonth this doesn't stop at the month end,
+      // so it always answers "what's coming up?".
+      listUpcoming: {
+        type: "list",
+        duration: { days: 60 },
+        buttonText: "Upcoming",
+        noEventsText: "No events in the next 60 days",
+      },
+      // Week view: match the sheet's 6 AM–11:30 PM range, open around morning.
+      timeGridWeek: {
+        slotMinTime: "06:00:00",
+        slotMaxTime: "24:00:00",
+        scrollTime: "08:00:00",
+      },
+    },
     dayMaxEvents: 4,
     googleCalendarApiKey: apiKey,
     eventClick: function (info) { info.jsEvent.preventDefault(); showModal(info.event); },
+    // Fires whenever the layout changes (or you page prev/next) — keep the URL right.
+    datesSet: function (info) {
+      const key = Object.keys(CAL_VIEWS).find((k) => CAL_VIEWS[k] === info.view.type);
+      if (key && key !== curCal) { curCal = key; }
+      updateUrl();
+    },
   });
 
   if (!apiKey) {
@@ -156,7 +215,7 @@ function setView(viewId) {
     n.textContent = "Live calendar not configured yet — add a Google Calendar API key in committees.json (google_api_key), regenerate, and redeploy.";
   }
 
-  setView(DEFAULT_VIEW);
+  setView(viewFromUrl()); // ?view=boys / girls / general (defaults to General)
   calendar.render();
 })();
 

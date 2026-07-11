@@ -88,6 +88,25 @@ def load_combined(path=COMMITTEES_JSON):
     return [{"sheet": s["id"], **s["combined"]} for s in load_sheets(path)]
 
 
+def load_extra_calendars(path=COMMITTEES_JSON):
+    """Website-only display calendars (e.g. US Holidays) — not synced from a sheet."""
+    data = _load(path)
+    out = []
+    for e in data.get("extra_calendars", []):
+        cid = e.get("calendar_id", "").strip()
+        out.append({
+            "key": e["key"],
+            "name": e["name"],
+            "section": e.get("section", "general"),
+            "color": e["color"],
+            "calendar_id": cid,
+            "ical_url": derive_ical_url(cid),
+            "subscribe_url": derive_subscribe_url(cid),
+            "display_only": True,
+        })
+    return out
+
+
 def load_settings(path=COMMITTEES_JSON):
     data = _load(path)
     return {

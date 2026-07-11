@@ -24,7 +24,9 @@ import sys
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "render"))
 
-from committees import load_sheets, load_committees, load_combined, load_settings  # noqa: E402
+from committees import (  # noqa: E402
+    load_sheets, load_committees, load_combined, load_settings, load_extra_calendars,
+)
 
 APPS_SCRIPT = os.path.join(ROOT, "apps-script")
 SITE_DATA = os.path.join(ROOT, "site", "data")
@@ -78,9 +80,9 @@ def _write_json(name, obj):
     print(f"  wrote {os.path.relpath(path, ROOT)}")
 
 
-def write_site_config(committees, combined, settings):
+def write_site_config(committees, extras, combined, settings):
     """Static config the live website reads (events load live from the browser)."""
-    _write_json("committees.json", [
+    items = [
         {
             "key": t["key"],
             "name": t["name"],
@@ -91,7 +93,23 @@ def write_site_config(committees, combined, settings):
             "ical_url": t["ical_url"],
         }
         for t in committees
-    ])
+    ]
+    # Website-only display calendars (e.g. US Holidays): shown on the calendar,
+    # skipped on the subscribe page (display_only).
+    items += [
+        {
+            "key": e["key"],
+            "name": e["name"],
+            "section": e["section"],
+            "color": e["color"],
+            "calendar_id": e["calendar_id"],
+            "subscribe_url": e["subscribe_url"],
+            "ical_url": e["ical_url"],
+            "display_only": True,
+        }
+        for e in extras
+    ]
+    _write_json("committees.json", items)
     _write_json("combined.json", [
         {
             "sheet": c["sheet"],
@@ -115,7 +133,7 @@ def main():
     for sheet in sheets:
         print(f"  [{sheet['name']}] {len(sheet['tabs'])} tabs")
         write_committees_gs(sheet)
-    write_site_config(load_committees(), load_combined(), load_settings())
+    write_site_config(load_committees(), load_extra_calendars(), load_combined(), load_settings())
     print("Done. Paste each Committees.<sheet>.gs into the matching sheet's Apps "
           "Script; commit + push to update the live site.")
 

@@ -3,6 +3,16 @@
   "_comment": "SINGLE SOURCE OF TRUTH. Two sheets (boys, girls). Per tab provide: key, name (website label), tab (Google Sheet tab name), section (general|boys|girls), color, calendar_id. iCal + subscribe URLs are auto-derived. After editing, run: python tools/gen_config.py (regenerates _Config.*.csv, Committees.*.gs, and site/data/*.json).",
   "google_api_key": "AIzaSyB00uRS89jZKkejMKlg58nsUYjsuHu2UjQ",
   "_google_api_key_note": "Public Google Calendar API key for the live website. Read-only, restricted to the Calendar API + your site's domain. Safe to expose in a public site.",
+  "_extra_calendars_note": "Website-only display calendars (not synced from a sheet). Google's public US Holidays calendar shows on the site with no setup. section=general shows it in every view.",
+  "extra_calendars": [
+    {
+      "key": "us_holidays",
+      "name": "US Holidays",
+      "section": "general",
+      "color": "#64748b",
+      "calendar_id": "en.usa#holiday@group.v.calendar.google.com"
+    }
+  ],
   "sheets": [
     {
       "id": "boys",

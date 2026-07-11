@@ -1,6 +1,9 @@
 # Editor / tooling
 .claude/
 
+# Keep the README local only (not published to the public repo)
+/README.md
+
 # Python
 __pycache__/
 *.pyc

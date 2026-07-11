@@ -26,9 +26,9 @@ var STYLED_ROWS = 300;
 // Columns: Title, Start Date, Start Time, End Date, End Time, Location,
 //          Description, Repeat, Repeat Until, [3 auto].
 var SAMPLE_ROWS = [
-  ['Weekly Study Circle', '2026-07-07', '18:30', '', '20:00', 'Main Hall',
+  ['Weekly Study Circle', '2026-07-07', '6:30 PM', '', '8:00 PM', 'Main Hall',
    'Bring your notebooks.', 'Weekly', '2026-08-25', '', '', ''],
-  ['Guest Speaker Night', '2026-07-15', '19:00', '', '20:30', 'Room 204',
+  ['Guest Speaker Night', '2026-07-15', '7:00 PM', '', '8:30 PM', 'Room 204',
    'Special guest TBA.', 'None', '', '', '', ''],
   ['Community Service Day', '2026-07-22', '', '', '', 'City Park',
    'All-day event — leave Start Time blank for all-day.', 'None', '', '', '', ''],
@@ -102,7 +102,7 @@ function formatCommitteeTab(sheet, accent) {
   // Friendly hover notes on the trickier columns.
   sheet.getRange(1, COL.TITLE).setNote('Required.');
   sheet.getRange(1, COL.START_DATE).setNote('Required. Click the cell and pick a date.');
-  sheet.getRange(1, COL.START_TIME).setNote('Leave blank for an all-day event.\nUse 24-hour time, e.g. 18:30 = 6:30 PM.');
+  sheet.getRange(1, COL.START_TIME).setNote('Leave blank for an all-day event.\nPick a time like 6:30 PM (up to 11:30 PM).');
   sheet.getRange(1, COL.END_DATE).setNote('Leave blank for single-day events.\nFill in for multi-day events (e.g. a 3-day camp) — enter the actual last day.');
   sheet.getRange(1, COL.REPEAT).setNote('None, Weekly, or Monthly.');
   sheet.getRange(1, COL.STATUS).setNote('Auto-filled by the sync — don\'t edit Status, Last Synced, or the hidden Event ID column.');
@@ -123,8 +123,8 @@ function formatCommitteeTab(sheet, accent) {
   sheet.getRange(2, COL.START_DATE, rows, 1).setNumberFormat('ddd, mmm d, yyyy');
   sheet.getRange(2, COL.END_DATE, rows, 1).setNumberFormat('ddd, mmm d, yyyy');
   sheet.getRange(2, COL.REPEAT_UNTIL, rows, 1).setNumberFormat('ddd, mmm d, yyyy');
-  sheet.getRange(2, COL.START_TIME, rows, 1).setNumberFormat('HH:mm');
-  sheet.getRange(2, COL.END_TIME, rows, 1).setNumberFormat('HH:mm');
+  sheet.getRange(2, COL.START_TIME, rows, 1).setNumberFormat('h:mm AM/PM');
+  sheet.getRange(2, COL.END_TIME, rows, 1).setNumberFormat('h:mm AM/PM');
   sheet.getRange(2, COL.DESCRIPTION, rows, 1).setWrap(true);
 
   // Alignment: center dates/times/repeat, middle-align everything.
@@ -142,7 +142,7 @@ function formatCommitteeTab(sheet, accent) {
 
   var timePicker = SpreadsheetApp.newDataValidation()
     .requireValueInList(timeOptions_(), true).setAllowInvalid(true)
-    .setHelpText('Pick a time, or type your own as 24-hour HH:MM (e.g. 18:45).').build();
+    .setHelpText('Pick a time, or type your own (e.g. 6:45 PM).').build();
   sheet.getRange(2, COL.START_TIME, rows, 1).setDataValidation(timePicker);
   sheet.getRange(2, COL.END_TIME, rows, 1).setDataValidation(timePicker);
 
@@ -234,17 +234,19 @@ function markRequiredHeaders_(sheet) {
   });
 }
 
-/** Half-hour time options 06:00..22:00 for the Start/End Time dropdowns. */
+/** Half-hour AM/PM time options 6:00 AM .. 11:30 PM for the Start/End Time dropdowns. */
 function timeOptions_() {
   var out = [];
-  for (var h = 6; h <= 22; h++) {
-    out.push(pad2_(h) + ':00');
-    out.push(pad2_(h) + ':30');
+  for (var h = 6; h <= 23; h++) {
+    out.push(fmtAmPm_(h, 0));
+    out.push(fmtAmPm_(h, 30));
   }
   return out;
 }
 
-function pad2_(n) {
-  return (n < 10 ? '0' : '') + n;
+function fmtAmPm_(h, m) {
+  var mer = h < 12 ? 'AM' : 'PM';
+  var hh = h % 12; if (hh === 0) hh = 12;
+  return hh + ':' + (m < 10 ? '0' + m : m) + ' ' + mer;
 }
 

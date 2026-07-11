@@ -70,5 +70,15 @@
     "calendar_id": "c_17d81c354c8b80ebacc2b63b35603d6127f47371f4d7af9dc3d998b8c2ec6449@group.calendar.google.com",
     "subscribe_url": "https://calendar.google.com/calendar/u/0/r?cid=c_17d81c354c8b80ebacc2b63b35603d6127f47371f4d7af9dc3d998b8c2ec6449@group.calendar.google.com",
     "ical_url": "https://calendar.google.com/calendar/ical/c_17d81c354c8b80ebacc2b63b35603d6127f47371f4d7af9dc3d998b8c2ec6449%40group.calendar.google.com/public/basic.ics"
+  },
+  {
+    "key": "us_holidays",
+    "name": "US Holidays",
+    "section": "general",
+    "color": "#64748b",
+    "calendar_id": "en.usa#holiday@group.v.calendar.google.com",
+    "subscribe_url": "https://calendar.google.com/calendar/u/0/r?cid=en.usa#holiday@group.v.calendar.google.com",
+    "ical_url": "https://calendar.google.com/calendar/ical/en.usa%23holiday%40group.v.calendar.google.com/public/basic.ics",
+    "display_only": true
   }
 ]

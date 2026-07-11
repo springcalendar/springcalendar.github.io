@@ -78,16 +78,15 @@ function cardHTML(item) {
       ? `<a class="btn ghost" href="${c.ical_url}">iCal link</a>`
       : "";
     return `<div class="all-banner">
-        <div class="all-text"><h2>${c.name}</h2>
-          <p>Every ${c.sheet} event in one calendar.</p></div>
+        <div class="all-text"><h2>${c.name}</h2></div>
         <div class="all-actions">${gcal}${ical}</div>
       </div>`;
   }).join("");
 
-  // Group cards by section.
+  // Group cards by section (skip website-only display calendars like US Holidays).
   const sectionsEl = document.getElementById("sections");
   for (const s of SECTIONS) {
-    const items = committees.filter((c) => c.section === s.id);
+    const items = committees.filter((c) => c.section === s.id && !c.display_only);
     if (!items.length) continue;
     const block = document.createElement("section");
     block.className = "sub-section";

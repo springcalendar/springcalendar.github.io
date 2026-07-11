@@ -166,6 +166,9 @@ a { color: inherit; }
 .all-banner h2 { margin: 0; font-size: 22px; }
 .all-banner p { margin: 4px 0 0; color: #cbd5e1; font-size: 14px; }
 .all-actions { display: flex; gap: 10px; flex-wrap: wrap; }
+/* Buttons sit on the dark banner — make them readable */
+.all-banner .btn.primary { background: #fff; color: #0f172a; }
+.all-banner .btn.ghost { color: #fff; border-color: rgba(255, 255, 255, 0.55); }
 .all-note { color: var(--muted); font-size: 13px; margin: 10px 2px 0; }
 .combined-cards { display: grid; gap: 14px; margin-top: 24px; }
 .sub-section { margin-top: 30px; }
@@ -223,6 +226,8 @@ a { color: inherit; }
   }
   .fc .fc-toolbar-title { font-size: 1.15rem; text-align: center; }
   .fc .fc-button { padding: 5px 9px; font-size: 0.85rem; }
+  /* Four view buttons (Month/Week/Year/Upcoming) must wrap, not overflow */
+  .fc .fc-toolbar-chunk { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; }
 
   /* All-events banner + card buttons stack full width */
   .all-banner { flex-direction: column; align-items: stretch; text-align: left; }
