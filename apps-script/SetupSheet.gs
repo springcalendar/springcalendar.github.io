@@ -44,6 +44,8 @@ function onOpen() {
     .addSeparator()
     .addItem('Sync now', 'syncAll')          // from Code.gs
     .addItem('Install auto-sync triggers', 'setupTriggers')  // from Code.gs
+    .addSeparator()
+    .addItem('Diagnose sync (read-only)', 'diagnoseSync')    // from Code.gs
     .addToUi();
 }
 

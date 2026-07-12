@@ -318,7 +318,39 @@ function applyToEvent(event, ev) {
   }
 }
 
+/** CalendarApp ids look like "abc@google.com"; the Calendar API wants just "abc". */
+function apiEventId_(id) {
+  return String(id).replace(/@google\.com$/, '');
+}
+
+/**
+ * Delete an event by the id stored in the sheet — single events AND whole
+ * recurring series.
+ *
+ * getEventById() returns NULL for a recurring series id (you need
+ * getEventSeriesById), so the old "fetch then delete" approach silently did
+ * nothing for repeating events. Try the series first, and prefer the Calendar API,
+ * which removes a series outright when given the series id.
+ */
 function deleteEvent(calendar, eventId) {
+  if (typeof Calendar !== 'undefined' && Calendar.Events) {
+    try {
+      Calendar.Events.remove(calendar.getId(), apiEventId_(eventId));
+      return; // removes a series outright
+    } catch (err) {
+      // 404/410 = already gone. Anything else: fall through to CalendarApp.
+      var msg = String(err);
+      if (msg.indexOf('404') >= 0 || msg.indexOf('410') >= 0 || /not found|deleted/i.test(msg)) return;
+      Logger.log('Calendar API delete failed for ' + eventId + ' (' + err + ') — trying CalendarApp.');
+    }
+  }
+
+  // CalendarApp fallback — series FIRST, because getEventById() misses series.
+  try {
+    var series = calendar.getEventSeriesById(eventId);
+    if (series) { series.deleteEventSeries(); return; }
+  } catch (e) { /* not a series (or no access) — fall through */ }
+
   var event = safeGetEvent(calendar, eventId);
   if (event) {
     try { event.deleteEventSeries(); } catch (e) { /* not a series */ }
@@ -362,9 +394,12 @@ function listManagedEvents_(calendarId) {
         var items = resp.items || [];
         for (var i = 0; i < items.length; i++) {
           var p = (items[i].extendedProperties && items[i].extendedProperties.private) || {};
-          if (!p[ID_TAG]) continue; // can't map it back to a row — leave it alone
+          // Events created before ID_TAG existed have no ses_id. Don't skip them —
+          // they'd be invisible to the sweep and could never be deleted. The sheet
+          // stores CalendarApp ids ("<id>@google.com"); the API returns "<id>".
+          var id = p[ID_TAG] || (items[i].id + '@google.com');
           out.push({
-            id: p[ID_TAG],
+            id: id,
             src: p[SRC_TAG] || '',
             hash: p[HASH_TAG] || '',
             recurring: !!items[i].recurrence
@@ -389,11 +424,14 @@ function listManagedEvents_(calendarId) {
     var recurring = !!(e.isRecurringEvent && e.isRecurringEvent());
     var id = e.getTag(ID_TAG);
     if (!id) {
-      // Legacy event with no ID_TAG. A recurring *instance*'s getId() can't be
-      // matched to the series id in the sheet, so leave those alone; singles are
-      // safe. upsertEvent re-tags live events, so this only hits old orphans.
-      if (recurring) continue;
-      id = e.getId();
+      // Legacy event with no ID_TAG. A recurring INSTANCE's getId() is not the
+      // series id the sheet stored, so ask for the series id — otherwise the event
+      // is invisible to the sweep and can never be deleted.
+      if (recurring) {
+        try { id = e.getEventSeries().getId(); } catch (err) { continue; }
+      } else {
+        id = e.getId();
+      }
     }
     if (seen[id]) continue;   // a series yields many instances — collapse them
     seen[id] = true;
@@ -405,6 +443,61 @@ function listManagedEvents_(calendarId) {
     });
   }
   return list;
+}
+
+/**
+ * READ-ONLY diagnosis: shows exactly what the sync sees on each calendar and which
+ * events it considers orphans. Changes nothing. Use it when an event won't delete.
+ */
+function diagnoseSync() {
+  var fast = (typeof Calendar !== 'undefined' && Calendar.Events);
+  var out = ['Calendar API: ' + (fast ? 'ENABLED (fast path)' : 'NOT enabled (slow fallback)')];
+  var map = readConfig();
+
+  Object.keys(map).forEach(function (name) {
+    var cfg = map[name];
+    var combined = isCombinedName_(name);
+    out.push('');
+    out.push('=== ' + name + (combined ? '  [combined mirror]' : '') + ' ===');
+
+    var managed = listManagedEvents_(cfg.calendarId);
+
+    // Which Event IDs does the sheet still reference?
+    var inSheet = {};
+    var sheet = SpreadsheetApp.getActive().getSheetByName(name);
+    if (sheet) {
+      var lastRow = sheet.getLastRow();
+      if (lastRow >= FIRST_DATA_ROW) {
+        var data = sheet.getRange(FIRST_DATA_ROW, 1, lastRow - FIRST_DATA_ROW + 1, NUM_COLS).getValues();
+        for (var i = 0; i < data.length; i++) {
+          var rid = String(data[i][COL.EVENT_ID - 1] || '').trim();
+          if (rid) inSheet[rid] = String(data[i][COL.TITLE - 1] || '(untitled)');
+        }
+      }
+      out.push('  rows in sheet with an Event ID : ' + Object.keys(inSheet).length);
+    }
+    out.push('  events we manage on calendar   : ' + managed.length);
+
+    for (var k = 0; k < managed.length; k++) {
+      var m = managed[k];
+      if (combined) {
+        out.push('    mirror  recurring=' + (m.recurring ? 'yes' : 'no') + '  src=' + m.src);
+        continue;
+      }
+      var keep = !!inSheet[m.id];
+      out.push('    ' + (keep ? 'KEEP  ' : 'ORPHAN') +
+               '  recurring=' + (m.recurring ? 'yes' : 'no ') +
+               '  ' + (keep ? inSheet[m.id] : '<- will be deleted next sync') +
+               '  id=' + m.id);
+    }
+  });
+
+  var text = out.join('\n');
+  Logger.log(text);
+  SpreadsheetApp.getUi().alert(
+    'Sync diagnosis',
+    text.length > 1400 ? text.substring(0, 1400) + '\n\n…full output in the Executions log.' : text,
+    SpreadsheetApp.getUi().ButtonSet.OK);
 }
 
 /**

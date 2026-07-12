@@ -84,14 +84,38 @@ async function loadJSON(path) {
   return res.json();
 }
 
+const D_OPTS = { weekday: "long", year: "numeric", month: "long", day: "numeric" };
+const T_OPTS = { hour: "numeric", minute: "2-digit" };
+const sameDay = (a, b) => a.toDateString() === b.toDateString();
+
 function fmtWhen(ev) {
-  const opts = { weekday: "long", year: "numeric", month: "long", day: "numeric" };
   const start = ev.start;
-  if (ev.allDay) return start.toLocaleDateString(undefined, opts) + " · All day";
-  const time = { hour: "numeric", minute: "2-digit" };
-  let s = start.toLocaleDateString(undefined, opts) + " · " +
-          start.toLocaleTimeString(undefined, time);
-  if (ev.end) s += " – " + ev.end.toLocaleTimeString(undefined, time);
+  const end = ev.end;
+
+  if (ev.allDay) {
+    if (end) {
+      // All-day ends are EXCLUSIVE (a camp on Aug 3–5 is stored as ending Aug 6),
+      // so step back one day to get the real last day. setDate() is DST-safe.
+      const last = new Date(end.getTime());
+      last.setDate(last.getDate() - 1);
+      if (!sameDay(last, start)) {
+        return start.toLocaleDateString(undefined, D_OPTS) + "  –  " +
+               last.toLocaleDateString(undefined, D_OPTS) + " · All day";
+      }
+    }
+    return start.toLocaleDateString(undefined, D_OPTS) + " · All day";
+  }
+
+  let s = start.toLocaleDateString(undefined, D_OPTS) + " · " +
+          start.toLocaleTimeString(undefined, T_OPTS);
+  if (end) {
+    // Spans days? Show the end DATE too, not just the time — otherwise a Jul 3 →
+    // Jul 5 event reads like a 2-hour event.
+    s += "  –  " + (sameDay(end, start)
+      ? end.toLocaleTimeString(undefined, T_OPTS)
+      : end.toLocaleDateString(undefined, D_OPTS) + " · " +
+        end.toLocaleTimeString(undefined, T_OPTS));
+  }
   return s;
 }
 
