@@ -40,4 +40,5 @@ protection — run "Set up / repair sheet" afterward to apply them.
 - Leave **End Date blank** for single-day; fill it in for multi-day events.
 - **Repeat** = `None` / `Weekly` / `Monthly`; set **Repeat Until** for repeating events.
 - **Columns J–L are auto-managed — don't edit them.** Event ID (L) is hidden.
-- To **remove** an event, clear its row's cells (don't delete the whole row).
+- To **remove** an event, just **delete the row** (or clear its cells — both work).
+  The calendar event is removed within seconds, recurring series included.

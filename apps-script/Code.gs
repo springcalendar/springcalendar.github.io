@@ -33,6 +33,10 @@ var FIRST_DATA_ROW = 2;
 var SYNC_TAG = 'ses_sync';   // marks events we manage
 var HASH_TAG = 'ses_hash';   // content hash for change detection
 var SRC_TAG = 'ses_src';     // on combined-calendar mirrors: source committee event id
+// The event id we also store in the sheet. Recurring INSTANCES inherit their
+// series' tags, so this lets the orphan sweep map any fetched event (single or
+// recurring instance) back to the row that owns it — which getId() cannot do.
+var ID_TAG = 'ses_id';
 // The _Config row whose Committee name starts with this prefix is THIS sheet's
 // combined mirror calendar. So the Boys sheet auto-targets "SES – All Events Boys"
 // and the Girls sheet "SES – All Events Girls" using the exact same code (en dash).
@@ -58,7 +62,27 @@ function setupTriggers() {
     .forSpreadsheet(SpreadsheetApp.getActive())
     .onEdit()
     .create();
+  // Deleting a row is a STRUCTURAL change: it fires onChange, never onEdit. Without
+  // this trigger, deleting a row wouldn't sync until the 10-minute timed run.
+  ScriptApp.newTrigger('onChangeSync')
+    .forSpreadsheet(SpreadsheetApp.getActive())
+    .onChange()
+    .create();
   SpreadsheetApp.getActive().toast('Triggers installed. Running first sync…');
+  syncAll();
+}
+
+/**
+ * Structural change (row inserted/removed). We act ONLY on REMOVE_ROW:
+ * a deleted row takes its Event ID with it, so the calendar event can only be
+ * found by the orphan sweep in syncAll().
+ *
+ * Restricting to REMOVE_ROW is also the loop guard: unlike onEdit, an installable
+ * onChange CAN fire on the script's own writes (Status / Last Synced). Our script
+ * never removes rows, so this handler can never re-trigger itself.
+ */
+function onChangeSync(e) {
+  if (!e || e.changeType !== 'REMOVE_ROW') return;
   syncAll();
 }
 
@@ -81,7 +105,10 @@ function onEditSync(e) {
   var start = e.range.getRow();
   var count = e.range.getNumRows();
   for (var r = start; r < start + count; r++) {
-    if (r >= FIRST_DATA_ROW) syncSheetRow(sheet, calendar, r, null, null);
+    if (r < FIRST_DATA_ROW) continue;
+    var res = syncSheetRow(sheet, calendar, r, null, null);
+    // One write for Status / Last Synced / Event ID (they're contiguous J:L).
+    sheet.getRange(r, COL.STATUS, 1, 3).setValues([res.auto]);
   }
 }
 
@@ -91,26 +118,38 @@ function onEditSync(e) {
 
 /** Sync every committee tab in CONFIG_ROWS, then mirror into the combined calendar. */
 function syncAll() {
-  var map = readConfig();
-  var combined = null;
-  var live = []; // { id: committeeEventId, ev: parsedEvent } across all committees
+  // The timed trigger and onChangeSync can fire at once — don't let two runs
+  // reconcile the same calendars concurrently.
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(30000)) {
+    Logger.log('Another sync is already running — skipping this one.');
+    return;
+  }
 
-  Object.keys(map).forEach(function (sheetName) {
-    if (isCombinedName_(sheetName)) { combined = map[sheetName]; return; } // mirror target, not a tab
-    try {
-      var synced = syncSheet(sheetName, map[sheetName].calendarId);
-      for (var i = 0; i < synced.length; i++) live.push(synced[i]);
-    } catch (err) {
-      Logger.log('Sync failed for ' + sheetName + ': ' + err);
-    }
-  });
+  try {
+    var map = readConfig();
+    var combined = null;
+    var live = []; // { id: committeeEventId, ev: parsedEvent } across all committees
 
-  if (combined && combined.calendarId) {
-    try {
-      mirrorCombined_(combined.calendarId, live);
-    } catch (err) {
-      Logger.log('Combined mirror failed: ' + err);
+    Object.keys(map).forEach(function (sheetName) {
+      if (isCombinedName_(sheetName)) { combined = map[sheetName]; return; } // mirror target, not a tab
+      try {
+        var synced = syncSheet(sheetName, map[sheetName].calendarId);
+        for (var i = 0; i < synced.length; i++) live.push(synced[i]);
+      } catch (err) {
+        Logger.log('Sync failed for ' + sheetName + ': ' + err);
+      }
+    });
+
+    if (combined && combined.calendarId) {
+      try {
+        mirrorCombined_(combined.calendarId, live);
+      } catch (err) {
+        Logger.log('Combined mirror failed: ' + err);
+      }
     }
+  } finally {
+    lock.releaseLock();
   }
 }
 
@@ -129,13 +168,19 @@ function syncSheet(sheetName, calendarId) {
   var live = [];
 
   if (lastRow >= FIRST_DATA_ROW) {
+    var n = lastRow - FIRST_DATA_ROW + 1;
     // Read the whole data block in ONE call instead of row-by-row.
-    var data = sheet.getRange(FIRST_DATA_ROW, 1, lastRow - FIRST_DATA_ROW + 1, NUM_COLS)
-                    .getValues();
-    for (var i = 0; i < data.length; i++) {
+    var data = sheet.getRange(FIRST_DATA_ROW, 1, n, NUM_COLS).getValues();
+    var auto = []; // Status / Last Synced / Event ID for every row
+
+    for (var i = 0; i < n; i++) {
       var res = syncSheetRow(sheet, calendar, FIRST_DATA_ROW + i, liveIds, data[i]);
-      if (res) live.push(res);
+      auto.push(res.auto);
+      if (res.live) live.push(res.live);
     }
+
+    // ONE write for the whole J:L block instead of 3 API calls per row.
+    sheet.getRange(FIRST_DATA_ROW, COL.STATUS, n, 3).setValues(auto);
   }
 
   sweepOrphans(calendar, liveIds);
@@ -151,38 +196,49 @@ function syncSheetRow(sheet, calendar, row, liveIds, values) {
   if (!values) values = sheet.getRange(row, 1, 1, NUM_COLS).getValues()[0];
   var ev = parseRow(values);
   var eventId = String(values[COL.EVENT_ID - 1] || '').trim();
+  var lastSynced = values[COL.LAST_SYNCED - 1]; // keep the old stamp unless we sync
 
   // Blank row that still holds an Event ID => the event was removed.
   if (!ev.title && !ev.startDate) {
-    if (eventId) {
-      deleteEvent(calendar, eventId);
-      clearAutoCols(sheet, row);
-    }
-    return null;
+    if (eventId) deleteEvent(calendar, eventId);
+    return { auto: ['', '', ''], live: null };  // clears Status / Last Synced / Event ID
   }
 
   // Incomplete row (missing title or start date) — flag and skip.
   if (!ev.title || !ev.startDate) {
-    writeStatus(sheet, row, 'Needs Title and Start Date');
-    return null;
+    return { auto: ['Needs Title and Start Date', lastSynced, eventId], live: null };
   }
 
   try {
     var newId = upsertEvent(calendar, eventId, ev);
-    if (newId !== eventId) sheet.getRange(row, COL.EVENT_ID).setValue(newId);
     if (liveIds) liveIds[newId] = true;
-    sheet.getRange(row, COL.LAST_SYNCED).setValue(new Date());
-    writeStatus(sheet, row, 'Synced');
-    return { id: newId, ev: ev };
+    return { auto: ['Synced', new Date(), newId], live: { id: newId, ev: ev } };
   } catch (err) {
-    writeStatus(sheet, row, 'Error: ' + err.message);
-    return null;
+    return { auto: ['Error: ' + err.message, lastSynced, eventId], live: null };
   }
 }
 
 // ===========================================================================
 // Event create / update / delete
 // ===========================================================================
+
+/**
+ * Does the calendar event still match what the sheet says? The hash tag alone
+ * only detects SHEET changes — if someone edited the event directly in Google
+ * Calendar the tag is untouched, so we must compare the event's real fields.
+ * The sheet is the source of truth, so any mismatch gets overwritten.
+ */
+function eventMatches_(event, ev) {
+  if (event.getTitle() !== ev.title) return false;
+  if ((event.getLocation() || '') !== (ev.location || '')) return false;
+  if ((event.getDescription() || '') !== (ev.description || '')) return false;
+  if (event.isAllDayEvent() !== !!ev.allDay) return false;
+  if (!ev.allDay && ev.start && ev.end) {
+    if (event.getStartTime().getTime() !== ev.start.getTime()) return false;
+    if (event.getEndTime().getTime() !== ev.end.getTime()) return false;
+  }
+  return true;
+}
 
 /** Create or update; returns the (possibly new) event ID. */
 function upsertEvent(calendar, eventId, ev) {
@@ -192,13 +248,20 @@ function upsertEvent(calendar, eventId, ev) {
   if (eventId) {
     var existing = safeGetEvent(calendar, eventId);
     if (existing) {
-      if (existing.getTag(HASH_TAG) === hash) return eventId; // unchanged
+      var recurring = isSeries || (existing.isRecurringEvent && existing.isRecurringEvent());
+      // Unchanged in the sheet AND untouched in Google Calendar -> nothing to do.
+      // (Series fields aren't reliably comparable, so trust the hash for those.)
+      if (existing.getTag(HASH_TAG) === hash && (recurring || eventMatches_(existing, ev))) {
+        if (!existing.getTag(ID_TAG)) existing.setTag(ID_TAG, eventId); // heal legacy events
+        return eventId;
+      }
       // Series edits aren't reliably patchable in place -> recreate.
-      if (isSeries || existing.isRecurringEvent && existing.isRecurringEvent()) {
+      if (recurring) {
         deleteEvent(calendar, eventId);
       } else {
-        applyToEvent(existing, ev);
+        applyToEvent(existing, ev);          // sheet wins: overwrite any manual edit
         existing.setTag(HASH_TAG, hash);
+        existing.setTag(ID_TAG, eventId);
         return eventId;
       }
     }
@@ -208,9 +271,11 @@ function upsertEvent(calendar, eventId, ev) {
 
 function createEvent(calendar, ev, hash) {
   var event = createEventOn_(calendar, ev);
+  var id = event.getId();
   event.setTag(SYNC_TAG, '1');
   event.setTag(HASH_TAG, hash);
-  return event.getId();
+  event.setTag(ID_TAG, id);   // so the sweep can identify it (incl. recurring instances)
+  return id;
 }
 
 /** Build the calendar event on `calendar` (no tags). Shared by committee + mirror. */
@@ -261,21 +326,97 @@ function deleteEvent(calendar, eventId) {
   }
 }
 
-/** Delete managed single events whose ID no longer appears in the sheet. */
-function sweepOrphans(calendar, liveIds) {
-  var from = new Date();
-  from.setFullYear(from.getFullYear() - 1);
-  var to = new Date();
-  to.setFullYear(to.getFullYear() + 2);
+/** Window used ONLY by the slow fallback path (the fast path needs no window). */
+function sweepWindow_() {
+  var from = new Date(); from.setFullYear(from.getFullYear() - 2);
+  var to = new Date();   to.setFullYear(to.getFullYear() + 5);
+  return { from: from, to: to };
+}
 
-  var events = calendar.getEvents(from, to);
-  for (var i = 0; i < events.length; i++) {
-    var e = events[i];
-    if (e.getTag(SYNC_TAG) !== '1') continue;
-    if (e.isRecurringEvent && e.isRecurringEvent()) continue; // series handled by row-clear
-    if (!liveIds[e.getId()]) {
-      try { e.deleteEvent(); } catch (err) { /* ignore */ }
+/**
+ * List the events WE manage on a calendar, as { id, src, hash, recurring }.
+ * `id` is the same id stored in the sheet, so it can be matched to a row.
+ *
+ * FAST PATH (Calendar advanced service — enable via Apps Script → Services + →
+ * Calendar API): Google filters server-side to only our tagged events, a recurring
+ * series comes back as ONE item instead of every occurrence, and there is no time
+ * window at all (so nothing can escape cleanup).
+ *
+ * FALLBACK (CalendarApp): download every event in a 7-year window and filter here.
+ * Correct but much heavier — a weekly event expands into hundreds of instances.
+ * Used automatically if the advanced service isn't enabled, so nothing breaks.
+ */
+function listManagedEvents_(calendarId) {
+  if (typeof Calendar !== 'undefined' && Calendar.Events) {
+    try {
+      var out = [];
+      var pageToken = null;
+      do {
+        var resp = Calendar.Events.list(calendarId, {
+          privateExtendedProperty: SYNC_TAG + '=1', // only our events
+          singleEvents: false,                      // a series stays ONE item
+          showDeleted: false,
+          maxResults: 2500,
+          pageToken: pageToken
+        });
+        var items = resp.items || [];
+        for (var i = 0; i < items.length; i++) {
+          var p = (items[i].extendedProperties && items[i].extendedProperties.private) || {};
+          if (!p[ID_TAG]) continue; // can't map it back to a row — leave it alone
+          out.push({
+            id: p[ID_TAG],
+            src: p[SRC_TAG] || '',
+            hash: p[HASH_TAG] || '',
+            recurring: !!items[i].recurrence
+          });
+        }
+        pageToken = resp.nextPageToken;
+      } while (pageToken);
+      return out;
+    } catch (err) {
+      Logger.log('Calendar API unavailable (' + err + ') — using the slower fallback.');
     }
+  }
+
+  var calendar = CalendarApp.getCalendarById(calendarId);
+  if (!calendar) return [];
+  var w = sweepWindow_();
+  var events = calendar.getEvents(w.from, w.to);
+  var seen = {}, list = [];
+  for (var j = 0; j < events.length; j++) {
+    var e = events[j];
+    if (e.getTag(SYNC_TAG) !== '1') continue;                // not ours
+    var recurring = !!(e.isRecurringEvent && e.isRecurringEvent());
+    var id = e.getTag(ID_TAG);
+    if (!id) {
+      // Legacy event with no ID_TAG. A recurring *instance*'s getId() can't be
+      // matched to the series id in the sheet, so leave those alone; singles are
+      // safe. upsertEvent re-tags live events, so this only hits old orphans.
+      if (recurring) continue;
+      id = e.getId();
+    }
+    if (seen[id]) continue;   // a series yields many instances — collapse them
+    seen[id] = true;
+    list.push({
+      id: id,
+      src: e.getTag(SRC_TAG) || '',
+      hash: e.getTag(HASH_TAG) || '',
+      recurring: recurring
+    });
+  }
+  return list;
+}
+
+/**
+ * Delete every managed event whose row no longer exists in the sheet — recurring
+ * series included (the whole series, once).
+ */
+function sweepOrphans(calendar, liveIds) {
+  var managed = listManagedEvents_(calendar.getId());
+  for (var i = 0; i < managed.length; i++) {
+    var id = managed[i].id;
+    if (liveIds[id]) continue;  // still referenced by a row — keep
+    deleteEvent(calendar, id);  // series-aware: deleteEventSeries() then deleteEvent()
   }
 }
 
@@ -292,65 +433,61 @@ function mirrorCombined_(combinedCalendarId, live) {
   var cal = CalendarApp.getCalendarById(combinedCalendarId);
   if (!cal) { Logger.log('No access to combined calendar ' + combinedCalendarId); return; }
 
-  var from = new Date(); from.setFullYear(from.getFullYear() - 1);
-  var to = new Date(); to.setFullYear(to.getFullYear() + 2);
-  var existing = cal.getEvents(from, to);
+  // Only our mirrors, series collapsed to one item each (see listManagedEvents_).
+  var existing = listManagedEvents_(combinedCalendarId);
 
-  // Index existing mirrors by their source committee-event id.
+  // Index existing mirrors by the source committee-event id they copy.
   var bySrc = {};
   for (var i = 0; i < existing.length; i++) {
-    var e = existing[i];
-    if (e.getTag(SYNC_TAG) !== '1') continue;
-    var src = e.getTag(SRC_TAG);
-    if (src) bySrc[src] = e;
+    if (existing[i].src) bySrc[existing[i].src] = existing[i];
   }
 
-  // Create/update mirrors for every live committee event.
+  // Create/update a mirror for every live committee event.
   var liveSrc = {};
   for (var j = 0; j < live.length; j++) {
     var srcId = live[j].id;
     var ev = live[j].ev;
     liveSrc[srcId] = true;
     var hash = contentHash(ev);
-    var mirror = bySrc[srcId];
-    if (mirror) {
-      if (mirror.getTag(HASH_TAG) === hash) continue; // unchanged
-      var seriesish = ev.repeat === 'Weekly' || ev.repeat === 'Monthly' ||
-                      (mirror.isRecurringEvent && mirror.isRecurringEvent());
-      if (seriesish) {
-        deleteCalEvent_(mirror);
-        createMirror_(cal, ev, srcId, hash);
-      } else {
+    var m = bySrc[srcId];
+
+    if (!m) { createMirror_(cal, ev, srcId, hash); continue; }
+    if (m.hash === hash) continue; // unchanged — nothing to do (no API call)
+
+    var seriesish = m.recurring || ev.repeat === 'Weekly' || ev.repeat === 'Monthly';
+    if (seriesish) {
+      deleteEvent(cal, m.id);                 // series edits aren't patchable
+      createMirror_(cal, ev, srcId, hash);
+    } else {
+      // Only now do we fetch the real event object — the common (unchanged) case
+      // above costs no API call at all.
+      var mirror = safeGetEvent(cal, m.id);
+      if (mirror) {
         applyToEvent(mirror, ev);
         mirror.setTag(HASH_TAG, hash);
+      } else {
+        createMirror_(cal, ev, srcId, hash);  // vanished — recreate
       }
-    } else {
-      createMirror_(cal, ev, srcId, hash);
     }
   }
 
-  // Remove mirrors whose source row no longer exists. SRC_TAG is on the series,
-  // so recurring orphans are removed whole by their first instance.
+  // Remove mirrors whose source row no longer exists.
   for (var k = 0; k < existing.length; k++) {
-    var m = existing[k];
-    if (m.getTag(SYNC_TAG) !== '1') continue;
-    var s = m.getTag(SRC_TAG);
-    if (s && !liveSrc[s]) deleteCalEvent_(m);
+    var s = existing[k].src;
+    if (s && !liveSrc[s]) deleteEvent(cal, existing[k].id);
   }
 }
 
 function createMirror_(calendar, ev, srcId, hash) {
   var event = createEventOn_(calendar, ev);
+  var id = event.getId();
   event.setTag(SYNC_TAG, '1');
   event.setTag(SRC_TAG, srcId);
   event.setTag(HASH_TAG, hash);
-  return event.getId();
+  event.setTag(ID_TAG, id);   // lets listManagedEvents_ map it back
+  return id;
 }
 
-function deleteCalEvent_(event) {
-  try { event.deleteEventSeries(); } catch (e) { /* not a series */ }
-  try { event.deleteEvent(); } catch (e) { /* already gone */ }
-}
 
 // ===========================================================================
 // Helpers
@@ -460,13 +597,6 @@ function contentHash(ev) {
   }).join('');
 }
 
-function writeStatus(sheet, row, msg) {
-  sheet.getRange(row, COL.STATUS).setValue(msg);
-}
-
-function clearAutoCols(sheet, row) {
-  sheet.getRange(row, COL.STATUS, 1, 3).clearContent(); // Status, Last Synced, Event ID
-}
 
 /**
  * Read the tab → calendar mapping straight from CONFIG_ROWS (defined in the

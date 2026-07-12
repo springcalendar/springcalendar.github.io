@@ -75,14 +75,30 @@ function setupSheet() {
   SpreadsheetApp.getActive().toast('Sheet set up complete ✓');
 }
 
+/**
+ * Shrink the grid to what we actually use. A default tab is 1000 x 26 = 26,000
+ * cells but we only need 12 columns — that dead weight is the main reason the
+ * sheet feels slow when switching tabs. Never deletes rows that hold data.
+ */
+function trimGrid_(sheet, lastCol, rows) {
+  var maxCols = sheet.getMaxColumns();
+  if (maxCols > lastCol) sheet.deleteColumns(lastCol + 1, maxCols - lastCol);
+
+  // Keep header + styled rows, but never cut into rows that already have content.
+  var keep = Math.max(rows + 1, sheet.getLastRow());
+  var maxRows = sheet.getMaxRows();
+  if (maxRows > keep) sheet.deleteRows(keep + 1, maxRows - keep);
+}
+
 /** Header styling, formats, validation, and protection for one committee tab. */
 function formatCommitteeTab(sheet, accent) {
   var lastCol = HEADERS.length;
   var rows = STYLED_ROWS; // styled data-entry rows
 
-  // Clear any validation left over from a previous (larger) run across the whole
-  // sheet, so only the modest styled block stays "live" — this is the main fix
-  // for sheet sluggishness.
+  // Do this FIRST so we never format cells we're about to delete.
+  trimGrid_(sheet, lastCol, rows);
+
+  // Clear any validation left over from a previous (larger) run.
   sheet.getRange(2, 1, Math.max(sheet.getMaxRows() - 1, 1), lastCol).clearDataValidations();
 
   // --- Header row -------------------------------------------------------
@@ -125,7 +141,11 @@ function formatCommitteeTab(sheet, accent) {
   sheet.getRange(2, COL.REPEAT_UNTIL, rows, 1).setNumberFormat('ddd, mmm d, yyyy');
   sheet.getRange(2, COL.START_TIME, rows, 1).setNumberFormat('h:mm AM/PM');
   sheet.getRange(2, COL.END_TIME, rows, 1).setNumberFormat('h:mm AM/PM');
-  sheet.getRange(2, COL.DESCRIPTION, rows, 1).setWrap(true);
+  // CLIP, not wrap: wrapping forces Sheets to recompute row heights constantly,
+  // which is a real rendering drag. Full text is still visible on click.
+  sheet.getRange(2, COL.DESCRIPTION, rows, 1)
+       .setWrap(false)
+       .setWrapStrategy(SpreadsheetApp.WrapStrategy.CLIP);
 
   // Alignment: center dates/times/repeat, middle-align everything.
   sheet.getRange(2, 1, rows, lastCol).setVerticalAlignment('middle');
@@ -167,11 +187,14 @@ function formatCommitteeTab(sheet, accent) {
       .whenTextContains('Needs').setBackground('#fdf1d6').setFontColor('#a15c07')
       .setRanges([statusCol]).build(),
     // Required-but-empty cells turn red once the member has started the row.
+    // Deliberately a 2-cell check, not COUNTA($A2:$I2): a 9-cell scan per row
+    // across 300 rows is recalculated constantly and is a real drag. Filling
+    // either required field flags the other, which is the case that matters.
     SpreadsheetApp.newConditionalFormatRule()
-      .whenFormulaSatisfied('=AND($A2="",COUNTA($A2:$I2)>0)')
+      .whenFormulaSatisfied('=AND($A2="",$B2<>"")')
       .setBackground('#fde0e0').setRanges([titleCol]).build(),
     SpreadsheetApp.newConditionalFormatRule()
-      .whenFormulaSatisfied('=AND($B2="",COUNTA($A2:$I2)>0)')
+      .whenFormulaSatisfied('=AND($B2="",$A2<>"")')
       .setBackground('#fde0e0').setRanges([startCol]).build()
   ]);
 
@@ -185,9 +208,11 @@ function formatCommitteeTab(sheet, accent) {
       .setDescription('Auto-managed (do not edit)').setWarningOnly(true);
   }
 
-  // --- Outer + inner grid border ---------------------------------------
+  // --- Outer border only ------------------------------------------------
+  // The inner grid (last two args) bordered every one of ~3,600 cells. The row
+  // banding already separates rows, so the outline is enough — and much lighter.
   sheet.getRange(1, 1, rows + 1, lastCol)
-       .setBorder(true, true, true, true, true, true, '#dbe2ea', SpreadsheetApp.BorderStyle.SOLID);
+       .setBorder(true, true, true, true, false, false, '#dbe2ea', SpreadsheetApp.BorderStyle.SOLID);
 }
 
 /**
