@@ -1,4 +1,8 @@
 {
   "organization": "Spring Educational Services",
-  "google_api_key": "AIzaSyB00uRS89jZKkejMKlg58nsUYjsuHu2UjQ"
+  "google_api_key": "AIzaSyB00uRS89jZKkejMKlg58nsUYjsuHu2UjQ",
+  "published_sections": [
+    "general",
+    "boys"
+  ]
 }

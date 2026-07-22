@@ -124,6 +124,7 @@ def write_site_config(committees, extras, combined, settings):
     _write_json("settings.json", {
         "organization": settings["organization"],
         "google_api_key": settings["google_api_key"],
+        "published_sections": settings["published_sections"],
     })
 
 

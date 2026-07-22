@@ -63,12 +63,20 @@ function cardHTML(item) {
 }
 
 (async function () {
-  const [committees, combined] = await Promise.all([
+  const [allCommittees, allCombined, settings] = await Promise.all([
     loadJSON("data/committees.json"),
     loadJSON("data/combined.json").catch(() => []),
+    loadJSON("data/settings.json").catch(() => ({})),
   ]);
 
-  // Two "All Events" banners (Boys / Girls).
+  // Only show the sections this site publishes (see published_sections in
+  // committees.json). Unpublished groups keep syncing — they're just not listed.
+  const published = new Set(settings.published_sections || ["general", "boys", "girls"]);
+  const committees = allCommittees.filter((c) => published.has(c.section));
+  // A sheet's "All Events" mirror only appears if that group is published.
+  const combined = allCombined.filter((c) => published.has(c.sheet));
+
+  // "All Events" banner(s).
   const combinedEl = document.getElementById("combined");
   combinedEl.innerHTML = combined.map((c) => {
     const gcal = c.subscribe_url

@@ -58,12 +58,15 @@
 const DATA = "data/";
 const byKey = {};
 
-// Which sections each GROUP view shows. General = everything; Boys/Girls overlay General.
-const VIEWS = [
-  { id: "general", label: "General", sections: ["general", "boys", "girls"] },
-  { id: "boys",    label: "Boys",    sections: ["boys", "general"] },
-  { id: "girls",   label: "Girls",   sections: ["girls", "general"] },
+// Which sections each GROUP view shows. General = everything; Boys/Girls overlay
+// General. `needs` is the section a view exists for — if it isn't published, the
+// view is dropped (see published_sections in committees.json).
+const ALL_VIEWS = [
+  { id: "general", label: "General", sections: ["general", "boys", "girls"], needs: null },
+  { id: "boys",    label: "Boys",    sections: ["boys", "general"],          needs: "boys" },
+  { id: "girls",   label: "Girls",   sections: ["girls", "general"],         needs: "girls" },
 ];
+let VIEWS = ALL_VIEWS;          // narrowed to the published views on load
 const DEFAULT_VIEW = "general";
 
 // CALENDAR views (how the events are laid out) — friendly key -> FullCalendar view.
@@ -119,19 +122,68 @@ function fmtWhen(ev) {
   return s;
 }
 
+// Google's US Holidays feed carries 300+ entries: minor "observances" (St Patrick's
+// Day, Valentine's Day, Daylight Saving, Tax Day, Flag Day...) and "(substitute)"
+// duplicates alongside the real holidays. Show only these. Edit this list to change
+// what appears — anything not named here is hidden.
+const HOLIDAYS_SHOWN = [
+  "New Year's Day",
+  "Martin Luther King Jr. Day",
+  "Memorial Day",
+  "Juneteenth",
+  "Independence Day",
+  "Labor Day",
+  "Veterans Day",
+  "Thanksgiving Day",
+  "Christmas Day",
+];
+// Google mixes straight and curly apostrophes (e.g. "Presidents’ Day"), so
+// normalise before comparing or the match silently fails.
+const normHoliday = (s) => String(s || "").replace(/[‘’]/g, "'").trim().toLowerCase();
+const HOLIDAY_SET = new Set(HOLIDAYS_SHOWN.map(normHoliday));
+
 function source(c) {
-  return { id: c.key, googleCalendarId: c.calendar_id, color: c.color };
+  const s = { id: c.key, googleCalendarId: c.calendar_id, color: c.color };
+  if (c.key === "us_holidays") {
+    s.eventSourceSuccess = function (events) {
+      if (!Array.isArray(events)) return events;
+      return events.filter((e) => HOLIDAY_SET.has(normHoliday(e && (e.title || e.summary))));
+    };
+  }
+  return s;
 }
 
 function committeesForView(viewId) {
-  const view = VIEWS.find((v) => v.id === viewId);
+  const view = VIEWS.find((v) => v.id === viewId) || VIEWS[0];
   return committees.filter((c) => view.sections.includes(c.section) && c.calendar_id);
 }
 
-/** The group named in ?view=..., or the default if missing/unknown. */
+/**
+ * Narrow the group views to what's actually published, then drop any view that
+ * would show exactly the same calendars as an earlier one. With only Boys
+ * published, "General" and "Boys" are identical, so one view remains and the
+ * switch hides itself.
+ */
+function visibleViews(published) {
+  const seen = new Set();
+  const out = [];
+  for (const v of ALL_VIEWS) {
+    if (v.needs && !published.has(v.needs)) continue;
+    const shown = v.sections.filter((s) => published.has(s));
+    if (!shown.length) continue;
+    const key = shown.slice().sort().join(",");
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(v);
+  }
+  return out.length ? out : ALL_VIEWS;
+}
+
+/** The group named in ?view=..., or the first available view if missing/unpublished. */
 function viewFromUrl() {
   const q = (new URLSearchParams(location.search).get("view") || "").toLowerCase();
-  return VIEWS.some((v) => v.id === q) ? q : DEFAULT_VIEW;
+  if (VIEWS.some((v) => v.id === q)) return q;
+  return VIEWS.some((v) => v.id === DEFAULT_VIEW) ? DEFAULT_VIEW : VIEWS[0].id;
 }
 
 /** The calendar layout named in ?cal=..., or the default if missing/unknown. */
@@ -181,25 +233,36 @@ function setView(viewId) {
     loadJSON(DATA + "committees.json"),
     loadJSON(DATA + "settings.json").catch(() => ({})),
   ]);
-  committees = committeesData;
-  committees.forEach((c) => { byKey[c.key] = c; });
   apiKey = settings.google_api_key || "";
 
-  // Build the switch buttons.
+  // Only show the sections this site publishes (see published_sections in
+  // committees.json). Unpublished groups still sync to their calendars — they're
+  // just hidden here until they launch.
+  const published = new Set(settings.published_sections || ["general", "boys", "girls"]);
+  committees = committeesData.filter((c) => published.has(c.section));
+  committees.forEach((c) => { byKey[c.key] = c; });
+  VIEWS = visibleViews(published);
+
+  // Build the switch buttons — hidden entirely when there's only one view.
   const switchEl = document.getElementById("view-switch");
-  VIEWS.forEach((v) => {
-    const b = document.createElement("button");
-    b.textContent = v.label;
-    b.dataset.view = v.id;
-    b.addEventListener("click", () => setView(v.id));
-    switchEl.appendChild(b);
-  });
+  if (VIEWS.length > 1) {
+    VIEWS.forEach((v) => {
+      const b = document.createElement("button");
+      b.textContent = v.label;
+      b.dataset.view = v.id;
+      b.addEventListener("click", () => setView(v.id));
+      switchEl.appendChild(b);
+    });
+  } else {
+    document.querySelector(".switch-wrap").style.display = "none";
+  }
 
   curCal = calFromUrl();
 
   calendar = new FullCalendar.Calendar(document.getElementById("calendar"), {
     initialView: CAL_VIEWS[curCal],
     height: "auto",
+    firstDay: 1, // weeks start on Monday (applies to Month, Week and Year views)
     headerToolbar: {
       left: "prev,next today",
       center: "title",

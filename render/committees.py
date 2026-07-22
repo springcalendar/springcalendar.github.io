@@ -112,4 +112,8 @@ def load_settings(path=COMMITTEES_JSON):
     return {
         "organization": data.get("organization", ""),
         "google_api_key": data.get("google_api_key", ""),
+        # Which sections the website publishes. Unpublished sections stay fully
+        # configured and keep syncing — they're just hidden from the site.
+        "published_sections": data.get("published_sections",
+                                       ["general", "boys", "girls"]),
     }
