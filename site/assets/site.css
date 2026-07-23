@@ -110,6 +110,11 @@ a { color: inherit; }
   padding: 18px;
 }
 
+/* Year view: give each mini-month day enough height to show ~3 events before it
+   collapses to "+N more" (multiMonth collapsing is height-driven, not dayMaxEvents).
+   Kept modest so the whole year still fits without excessive scrolling. */
+.fc-multimonth .fc-daygrid-day-frame { min-height: 100px; }
+
 .hidden { display: none; }
 .notice {
   background: #fdf1d6;
